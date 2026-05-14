@@ -38,7 +38,7 @@ EXTRA_ARGS=()
 
 # ─── Minimum available RAM (MB) required to proceed ───
 # LLM model + runtime overhead
-MIN_AVAIL_MB=32000
+MIN_AVAIL_MB=20000
 
 case "${1:-}" in
     --vega)
@@ -76,75 +76,10 @@ case "${1:-}" in
         exit 0
         ;;
     *)
-        echo "  Mode: Vulkan on RTX 5090 (~2117/273 t/s)"
+        echo "  Mode: Vulkan on RTX "
         ;;
 esac
 
-# ─── Safeguard: stop memory-hungry services to free shared RAM ───
-# On UMA APUs, every GB counts — background services can push us into OOM territory.
-
-# Stop OpenClaw gateway if running (~0.5-1.8 GB)
-if systemctl --user is-active openclaw-gateway.service &>/dev/null; then
-    echo "⚠  OpenClaw gateway is running (uses 0.5-1.8 GB RAM)."
-    echo "   Stopping temporarily to free memory for the model..."
-    systemctl --user stop openclaw-gateway.service 2>/dev/null || true
-    sleep 1
-    echo "   Stopped. Restart later with: systemctl --user start openclaw-gateway"
-    echo ""
-fi
-
-# Stop Elasticsearch/RAGFlow containers if running (~4-5 GB)
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "ragflow-es"; then
-    echo "⚠  Elasticsearch (ragflow) is running (~4.7 GB RAM)."
-    echo "   Stopping Docker containers to free memory..."
-    docker stop ragflow-es-01 2>/dev/null || true
-    sleep 2
-    echo "   Stopped. Restart later with: docker start ragflow-es-01"
-    echo ""
-fi
-
-# Unload LM Studio models to free shared RAM
-if command -v lms &>/dev/null; then
-    LOADED=$(lms ps 2>/dev/null | grep -cE "^  " || true)
-    if [ "$LOADED" -gt 0 ] 2>/dev/null; then
-        echo "⚠  LM Studio has models loaded in memory."
-        echo "   On a UMA APU they share RAM with the GPU — running both will OOM."
-        echo ""
-        echo "   Unloading all LM Studio models..."
-        lms unload --all 2>/dev/null || true
-        sleep 2
-        echo "   Done."
-        echo ""
-    fi
-fi
-
-# ─── Safeguard: check available memory before launching ───
-AVAIL_MB=$(awk '/MemAvailable/ {printf "%d", $2/1024}' /proc/meminfo)
-echo "  Available RAM: ${AVAIL_MB} MB  (need ${MIN_AVAIL_MB} MB)"
-
-if [ "$AVAIL_MB" -lt "$MIN_AVAIL_MB" ]; then
-    echo ""
-    echo "✗  Not enough free memory to safely load the model."
-    echo "   Available: ${AVAIL_MB} MB — need at least ${MIN_AVAIL_MB} MB."
-    echo ""
-    echo "   This Vega 8 iGPU shares system RAM (UMA). Loading the model"
-    echo "   with insufficient memory will hard-lock the entire system."
-    echo ""
-    echo "   Try:"
-    echo "     • Close browsers / heavy apps"
-    echo "     • lms unload --all   (if LM Studio has models loaded)"
-    echo "     • Reboot if memory is fragmented"
-    echo ""
-    echo "   To bypass this check (at your own risk):"
-    echo "     SKIP_MEM_CHECK=1 ./start-llm.sh"
-    if [[ "${SKIP_MEM_CHECK:-}" == "1" ]]; then
-        echo ""
-        echo "   SKIP_MEM_CHECK=1 set — proceeding anyway..."
-    else
-        exit 1
-    fi
-fi
-echo ""
 
 # Kill existing process on port 8080
 PID=$(lsof -ti :$PORT 2>/dev/null) || true
@@ -154,7 +89,7 @@ if [ -n "$PID" ]; then
     sleep 1
 fi
 
-exec "$(dirname "$0")/run-llamaserver-${BACKEND}.sh" \
+exec "$(dirname "$0")/run/run-llamaserver-${BACKEND}.sh" \
     "$MODEL" \
     -ngl "$NGL" -c "$CTX" --port "$PORT" \
     -b 64 -ub 64 \

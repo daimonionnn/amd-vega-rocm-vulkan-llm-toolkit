@@ -58,18 +58,27 @@ fi
 # ── Auto-build image if missing ───────────────────────────────────────────────
 if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
     echo "Docker image '$IMAGE_NAME' not found. Building (this will take ~20-40 min)..."
-    docker build -t "$IMAGE_NAME" -f "$(dirname "$0")/Dockerfile.rocm7-vega" "$(dirname "$0")"
+    docker build -t "$IMAGE_NAME" -f "$(dirname "$0")/../build/Dockerfile.rocm7-vega" "$(dirname "$0")/.." 
 fi
 
-echo "════════════════════════════════════════════════════════"
-echo "  llama-server  ·  ROCm 7.2  ·  Vega 8 iGPU  (EXPERIMENTAL)"
-echo "════════════════════════════════════════════════════════"
-echo "  Model:  $MODEL_NAME"
+# ── Stop any existing container using this image or port 8080 ─────────────────
+EXISTING=$(docker ps -q --filter "ancestor=$IMAGE_NAME")
+if [ -n "$EXISTING" ]; then
+    echo "  Stopping existing $IMAGE_NAME container(s): $EXISTING"
+    docker stop $EXISTING
+fi
+PORT_CONFLICT=$(docker ps -q --filter "publish=8080")
+if [ -n "$PORT_CONFLICT" ]; then
+    echo "  Stopping container(s) holding port 8080: $PORT_CONFLICT"
+    docker stop $PORT_CONFLICT
+fi
 echo "  Dir:    $MODEL_DIR → /models"
 echo ""
 
 # shellcheck disable=SC2086
-docker run --rm -it \
+# Use -it when stdin is a TTY (interactive), drop -t when piped/backgrounded
+[[ -t 0 ]] && TTY_FLAG="-it" || TTY_FLAG="-i"
+docker run --rm $TTY_FLAG \
   --device=/dev/kfd \
   $EXTRA_DEVICES \
   --group-add=video \
@@ -84,6 +93,6 @@ docker run --rm -it \
   "$IMAGE_NAME" \
   --host 0.0.0.0 \
   -m "/models/$MODEL_NAME" \
-  -fa 1 \
+  -fa 0 \
   -ngl 99 \
   "$@"

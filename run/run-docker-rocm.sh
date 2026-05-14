@@ -1,8 +1,19 @@
 #!/bin/bash
+#
+# Run llama-server (ROCm 6) inside Docker, targeting the Vega 8 iGPU.
+#
+# With multiple AMD GPUs in the system (e.g. Vega 8 iGPU + Radeon 9700 AI Pro dGPU)
+# this script auto-detects the Vega 8 render node by PCI device ID and passes
+# ONLY that device into the container, so ROCR_VISIBLE_DEVICES=0 inside the
+# container is always the Vega 8.
+#
+# Usage:
+#   ./run-docker-rocm.sh /path/to/model.gguf [llama-server options]
 
-# Configuration
+set -euo pipefail
+
 IMAGE_NAME="llama-server-rocm-vega"
-MODEL="$1"
+MODEL="${1:-}"
 
 if [ -z "$MODEL" ]; then
     echo "Usage: ./run-docker-rocm.sh /path/to/model.gguf [llama-server options]"
@@ -11,33 +22,78 @@ fi
 
 MODEL_DIR=$(dirname "$MODEL")
 MODEL_NAME=$(basename "$MODEL")
-
 shift
 
-# Build the Docker image if it doesn't exist
-if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
-    echo "Docker image '$IMAGE_NAME' not found. Building it... this will take a few minutes."
-    docker build -t "$IMAGE_NAME" -f Dockerfile.rocm64 .
+# ── Detect Vega 8 render node by PCI device ID ────────────────────────────────
+# Ryzen 5700G Vega 8 = PCI device ID 0x1638  (gfx90c) — confirmed on /dev/dri/renderD129
+# Override with VEGA8_RENDER_NODE=/dev/dri/renderDXXX if auto-detect fails.
+VEGA8_PCI_ID="0x1638"
+VEGA8_RENDER_NODE="${VEGA8_RENDER_NODE:-}"
+
+if [ -z "$VEGA8_RENDER_NODE" ]; then
+    for node in /sys/class/drm/renderD*/device; do
+        dev_id="$(cat "$node/device" 2>/dev/null || true)"
+        if [ "$dev_id" = "$VEGA8_PCI_ID" ]; then
+            render_name="$(basename "$(dirname "$node")")"
+            VEGA8_RENDER_NODE="/dev/dri/$render_name"
+            break
+        fi
+    done
 fi
 
-echo "Starting llama-server inside ROCm docker..."
-echo "Model: $MODEL_NAME"
-echo "Mapping: $MODEL_DIR -> /models"
+if [ -z "$VEGA8_RENDER_NODE" ]; then
+    echo "⚠  Could not auto-detect Vega 8 render node (PCI ID $VEGA8_PCI_ID)."
+    echo "   Falling back to passing all /dev/dri devices — ROCm may pick the wrong GPU."
+    echo "   Override: VEGA8_RENDER_NODE=/dev/dri/renderDXXX ./run-docker-rocm.sh ..."
+    EXTRA_DEVICES="--device=/dev/dri"
+else
+    echo "  Vega 8 render node: $VEGA8_RENDER_NODE"
+    EXTRA_DEVICES="--device=$VEGA8_RENDER_NODE"
+fi
 
-docker run --rm -it \
+# ── Build image if missing ───────────────────────────────────────────────────
+if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+    echo "Docker image '$IMAGE_NAME' not found. Building (this will take ~10 min)..."
+    docker build -t "$IMAGE_NAME" -f "$(dirname "$0")/../build/Dockerfile.rocm64" "$(dirname "$0")/.."
+fi
+
+# ── Stop any existing container using this image or port 8080 ─────────────────
+EXISTING=$(docker ps -q --filter "ancestor=$IMAGE_NAME")
+if [ -n "$EXISTING" ]; then
+    echo "  Stopping existing $IMAGE_NAME container(s): $EXISTING"
+    docker stop $EXISTING
+fi
+PORT_CONFLICT=$(docker ps -q --filter "publish=8080")
+if [ -n "$PORT_CONFLICT" ]; then
+    echo "  Stopping container(s) holding port 8080: $PORT_CONFLICT"
+    docker stop $PORT_CONFLICT
+fi
+
+echo "════════════════════════════════════════════════════════"
+echo "  llama-server  ·  ROCm 6  ·  Vega 8 iGPU"
+echo "════════════════════════════════════════════════════════"
+echo "  Model:  $MODEL_NAME"
+echo "  Dir:    $MODEL_DIR -> /models"
+echo ""
+
+# shellcheck disable=SC2086
+# Use -it when stdin is a TTY (interactive), drop -t when piped/backgrounded
+[[ -t 0 ]] && TTY_FLAG="-it" || TTY_FLAG="-i"
+docker run --rm $TTY_FLAG \
   --device=/dev/kfd \
-  --device=/dev/dri \
+  $EXTRA_DEVICES \
   --group-add=video \
   --group-add=render \
   --ipc=host \
   --security-opt seccomp=unconfined \
   --ulimit memlock=-1 \
+  -e ROCR_VISIBLE_DEVICES=0 \
+  -e HIP_VISIBLE_DEVICES=0 \
   -v "$MODEL_DIR:/models:ro" \
   -p 8080:8080 \
   "$IMAGE_NAME" \
   --host 0.0.0.0 \
   -m "/models/$MODEL_NAME" \
-  -fa 1 \
+  -fa 0 \
   -ngl 99 \
-# --no-kv-offload
   "$@"

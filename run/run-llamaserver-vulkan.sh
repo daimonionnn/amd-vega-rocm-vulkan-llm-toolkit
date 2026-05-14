@@ -22,8 +22,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LLAMA_SERVER="$SCRIPT_DIR/llama.cpp-vulkan/bin/llama-server"
-LLAMA_LIB_DIR="$SCRIPT_DIR/llama.cpp-vulkan/lib"
+LLAMA_SERVER="$SCRIPT_DIR/../llm/vulkan/bin/llama-server"
+LLAMA_LIB_DIR="$SCRIPT_DIR/../llm/vulkan/lib"
 
 if [ ! -x "$LLAMA_SERVER" ]; then
     echo "✗  llama-server (Vulkan) not found at: $LLAMA_SERVER"

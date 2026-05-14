@@ -1,5 +1,5 @@
 # Build artifacts and external clones
-llama.cpp-*/
+llm/
 
 # Model files (do not commit huge binaries)
 *.gguf

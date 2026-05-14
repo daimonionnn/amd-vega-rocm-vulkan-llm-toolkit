@@ -32,7 +32,7 @@
 #   export HSA_ENABLE_SDMA=0
 #   export HSA_XNACK=0
 #   export GGML_HIP_UMA=0
-#   ./llama.cpp-rocm7-vega/bin/llama-server -m /path/to/model.gguf -ngl 99
+#   ./llm/rocm7-vega/bin/llama-server -m /path/to/model.gguf -ngl 99
 #
 
 set -euo pipefail
@@ -40,8 +40,8 @@ set -euo pipefail
 # ─── Config ──────────────────────────────────────────────────────────────────
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_BRANCH="master"
-BUILD_DIR="$(dirname "$0")/llama.cpp-build"
-INSTALL_DIR="$(dirname "$0")/llama.cpp-rocm7-vega"
+BUILD_DIR="$(dirname "$0")/../llm/build"
+INSTALL_DIR="$(dirname "$0")/../llm/rocm7-vega"
 AMDGPU_TARGET="gfx900"
 JOBS=$(nproc)
 SKIP_BACKPORT=false
@@ -297,6 +297,6 @@ echo "      -ngl 99 \\"
 echo "      --host 0.0.0.0 --port 8080"
 echo ""
 echo "  Compare performance vs ROCm 6 build:"
-echo "    ./bench-rocm.sh  (uses llama.cpp-rocm-vega/)"
-echo "    # swap INSTALL_DIR to llama.cpp-rocm7-vega/ to bench the 7.x build"
+echo "    ./bench/bench-rocm.sh  (uses llm/rocm-vega/)"
+echo "    # swap INSTALL_DIR to llm/rocm7-vega/ to bench the 7.x build"
 echo ""

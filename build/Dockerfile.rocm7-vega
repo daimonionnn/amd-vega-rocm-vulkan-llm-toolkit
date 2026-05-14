@@ -1,30 +1,24 @@
+FROM rocm/dev-ubuntu-22.04:6.3.4 AS rocm6-libs
+# Install rocblas in the 6.3.4 stage so the library files are present to copy
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends rocblas && \
+    rm -rf /var/lib/apt/lists/*
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  llama.cpp  ·  ROCm 7.2  ·  AMD Vega 8 iGPU  (gfx902 / gfx909 / gfx90c)
 # ─────────────────────────────────────────────────────────────────────────────
 #
 #  EXPERIMENTAL — ROCm 7.x officially dropped gfx900-family support.
-#  This Dockerfile reinstates it by backporting the gfx900 tensile libraries
-#  from ROCm 6.3.4 into the ROCm 7.2 rocBLAS install, mirroring the technique
-#  used by garymathews/frigate:440056a-rocm-7.2.0 for MIGraphX / Frigate NVR.
+#  This Dockerfile reinstates it by backporting gfx900 tensile libraries
+#  from ROCm 6.3.4 (multi-stage) into the ROCm 7.2 rocBLAS install, mirroring
+#  the technique used by garymathews/frigate:440056a-rocm-7.2.0.
 #
-#  Technique source:
-#    https://github.com/garymathews/frigate/releases/tag/440056a-rocm-7.2.0
-#    https://github.com/garymathews/AMDMIGraphX/blob/rocm-7.2.0/Dockerfile
-#
-#  Host requirements (same as ROCm 6 Docker setup):
-#    --device=/dev/kfd  --device=/dev/dri  --group-add=video --group-add=render
-#
-#  Build:
-#    docker build -t llama-rocm7-vega -f Dockerfile.rocm7-vega .
-#
-#  Run (use run-docker-rocm7.sh wrapper):
-#    ./run-docker-rocm7.sh /path/to/model.gguf
+#  Build:  docker build -t llama-rocm7-vega -f build/Dockerfile.rocm7-vega build/
+#  Run:    ./run/run-docker-rocm7.sh /path/to/model.gguf
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM rocm/dev-ubuntu-22.04:7.2
-
-# ── Build tools + ROCm HIP/BLAS dev headers ──────────────────────────────────
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       build-essential \
@@ -45,37 +39,40 @@ RUN apt-get update -qq && \
 # ── Backport gfx900 tensile libraries from ROCm 6.3.4 ────────────────────────
 #
 #  ROCm 7.x ships rocBLAS compiled without gfx900 tensile kernels.
-#  We fetch the rocBLAS package from the ROCm 6.3.4 repo, extract only the
-#  prebuilt gfx900 .co (code-object) kernel files, and drop them into the
-#  ROCm 7 library search path.  rocBLAS probes /opt/rocm/lib/rocblas/library/
-#  at runtime and will pick up the gfx900 kernels automatically.
+#  We copy the gfx900 .co kernel files + TensileLibrary_lazy_gfx900.dat
+#  directly from the ROCm 6.3.4 image (multi-stage) into the ROCm 7 library
+#  path.  rocBLAS probes /opt/rocm/lib/rocblas/library/ at runtime and will
+#  pick up the gfx900 kernels automatically.
 #
-#  This is the same trick garymathews used for Frigate — credits to him for
-#  discovering it works across major ROCm versions.
-#
+COPY --from=rocm6-libs /opt/rocm/lib/rocblas/library/ /tmp/rocm6-rocblas/
+
 RUN set -eux; \
-    # Add ROCm 6.3.4 apt repo (jammy) temporarily \
-    curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -; \
-    echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/6.3.4 jammy main" \
-        > /etc/apt/sources.list.d/rocm634.list; \
-    apt-get update -qq; \
-    # Download the rocblas .deb without installing it (would clash with rocm7) \
-    mkdir -p /tmp/rocblas634 && cd /tmp/rocblas634; \
-    apt-get download rocblas 2>/dev/null || \
-        apt-get download "$(apt-cache show rocblas | grep '^Package' | awk '{print $2}')"; \
-    # Extract package contents \
-    dpkg-deb -x rocblas_*.deb /tmp/rocblas634/extracted; \
-    # Copy only gfx900 code objects into ROCm 7 library path \
-    ROCM7_LIB_PATH="$(find /opt/rocm-* -maxdepth 3 -type d -name library 2>/dev/null | head -1)"; \
-    echo "Target rocBLAS library path: $ROCM7_LIB_PATH"; \
-    find /tmp/rocblas634/extracted -name '*gfx900*' | while read f; do \
+    ROCM7_LIB="/opt/rocm/lib/rocblas/library"; \
+    echo "ROCm 6.3.4 rocblas library contents (gfx900):"; \
+    ls /tmp/rocm6-rocblas/ | grep -i gfx900 || echo "  (none with gfx900 in name)"; \
+    # Copy all gfx900 .co kernel files \
+    find /tmp/rocm6-rocblas -name '*gfx900*' | while read f; do \
         echo "  Copying: $(basename $f)"; \
-        cp "$f" "$ROCM7_LIB_PATH/"; \
+        cp "$f" "$ROCM7_LIB/"; \
     done; \
-    # Clean up — remove the 6.3.4 repo so it doesn't interfere with anything \
-    rm /etc/apt/sources.list.d/rocm634.list; \
-    apt-get update -qq; \
-    rm -rf /tmp/rocblas634; \
+    # Install TensileLibrary_lazy_gfx900.dat \
+    GFX900_LAZY="$ROCM7_LIB/TensileLibrary_lazy_gfx900.dat"; \
+    if [ ! -f "$GFX900_LAZY" ]; then \
+        SRC="$(find /tmp/rocm6-rocblas -name 'TensileLibrary_lazy_gfx900.dat' | head -1)"; \
+        if [ -z "$SRC" ]; then \
+            SRC="$(find /tmp/rocm6-rocblas -name 'TensileLibrary.dat' | head -1)"; \
+            echo "  Using TensileLibrary.dat as TensileLibrary_lazy_gfx900.dat"; \
+        fi; \
+        if [ -n "$SRC" ]; then \
+            cp "$SRC" "$GFX900_LAZY"; \
+            echo "  Installed: TensileLibrary_lazy_gfx900.dat  ($(du -sh "$GFX900_LAZY" | cut -f1))"; \
+        else \
+            echo "  WARNING: no TensileLibrary*.dat found in ROCm 6.3.4!"; \
+        fi; \
+    fi; \
+    echo "=== ROCm 7 rocblas library (gfx900 files) ==="; \
+    ls "$ROCM7_LIB" | grep -i gfx900 || echo "  WARNING: still no gfx900 files!"; \
+    rm -rf /tmp/rocm6-rocblas; \
     echo "=== gfx900 tensile backport complete ==="
 
 # ── Clone llama.cpp ───────────────────────────────────────────────────────────

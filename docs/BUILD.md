@@ -6,7 +6,13 @@ Building llama.cpp from source with ROCm/HIP support for the AMD Vega 8 APU (gfx
 
 LM Studio's bundled ROCm backend only includes kernels for RDNA2+ GPUs (gfx1030 and newer). The Vega 8 iGPU uses the GCN 5 architecture (gfx90c), which isn't supported. Building llama.cpp ourselves lets us target `gfx900` — the closest official ROCm target to gfx90c.
 
-> **Status (April 2026):** The custom ROCm build compiles successfully and individual GPU kernel tests pass (SCALE, MUL_MAT across all quantization types). However, **native host ROCm GPU inference crashes** due to a fundamental version mismatch in Ubuntu 25.10's ROCm packages (clang-21 + HIP 5.7.1). **Docker ROCm 6.2.4 resolves this** — `./run-docker-rocm.sh` builds and runs a coherent ROCm stack inside a container, with full GPU offload working. For native GPU inference without Docker, **use Vulkan** — see [ARCHITECTURE.md](ARCHITECTURE.md#rocm-runtime-crash-analysis).
+> **Status (May 2026):** Native host ROCm GPU inference crashes (HIP 5.7.1/Clang-21 mismatch on Ubuntu 25.10). Two Docker solutions are available and confirmed working:
+> - **ROCm 6.2.4 Docker** (`./run/run-docker-rocm.sh`) — stable, full GPU offload confirmed
+> - **ROCm 7.2 Docker** (`./run/run-docker-rocm7.sh`) — confirmed working 2026-05-14, 35B full offload + sustained inference stable, gfx900 tensile backport (`TensileLibrary_lazy_gfx900.dat` + `*gfx900*` kernels from ROCm 6.3.4)
+>
+> For native GPU inference without Docker, **use Vulkan** — see [ARCHITECTURE.md](ARCHITECTURE.md#rocm-runtime-crash-analysis).
+>
+> **Multi-GPU note:** With AMD Radeon 9700 AI Pro also present, both Docker scripts auto-detect the Vega 8 render node by PCI ID (`0x1638`, `/dev/dri/renderD129`) and pass only that device into the container.
 
 ## Prerequisites
 
@@ -54,8 +60,8 @@ rocminfo 2>/dev/null   # Should list your GPU (with HSA_OVERRIDE_GFX_VERSION=9.0
 
 ```bash
 cd LLMToolkit
-chmod +x build-llamacpp-rocm-vega.sh
-./build-llamacpp-rocm-vega.sh
+chmod +x build/build-llamacpp-rocm-vega.sh
+./build/build-llamacpp-rocm-vega.sh
 ```
 
 ### What the Build Script Does
@@ -71,12 +77,12 @@ chmod +x build-llamacpp-rocm-vega.sh
    - `LLAMA_BUILD_SERVER=ON` — Build the HTTP server
    - `CMAKE_HIP_COMPILER=/usr/bin/clang++-21`
 5. **Builds** with all available CPU cores
-6. **Installs** to `llama.cpp-rocm-vega/`
+6. **Installs** to `llm/rocm-vega/`
 
 ### Build Output
 
 ```
-llama.cpp-rocm-vega/
+llm/rocm-vega/
 ├── bin/
 │   ├── llama-server          # OpenAI-compatible HTTP API server
 │   ├── llama-cli             # Interactive chat CLI
@@ -109,8 +115,52 @@ The script automatically:
 Just re-run:
 
 ```bash
-./build-llamacpp-rocm-vega.sh
+./build/build-llamacpp-rocm-vega.sh
 ```
+
+## ROCm 7.2 Build (Experimental)
+
+ROCm 7.x dropped official gfx900 support, but llama.cpp can still be built and run by backporting `gfx900` tensile GEMM kernels from ROCm 6.3.4. Confirmed working on Vega 8 as of 2026-05-14 (Qwen3.5-35B-A3B-Q4_K_M, 41/41 layers, sustained inference stable).
+
+**Key fix:** `TensileLibrary_lazy_gfx900.dat` must be present — ROCm 7 looks up this lazy index file first at runtime. Without it, inference crashes with `rocBLAS error: Cannot read TensileLibrary.dat: Illegal seek for GPU arch: gfx900`. The Dockerfile multi-stage build installs rocBLAS into a `rocm/dev-ubuntu-22.04:6.3.4` stage and copies the file across.
+
+### Docker (recommended)
+
+```bash
+# Build image (one-time, ~20-40 min — downloads ROCm 6.3.4 rocblas inside)
+docker build -t llama-rocm7-vega -f Dockerfile.rocm7-vega .
+
+# Run (auto-detects Vega 8 renderD129, ignores Radeon 9700)
+./run/run-docker-rocm7.sh /path/to/model.gguf -ngl 99 -c 2048
+```
+
+Key differences from ROCm 6 Docker:
+- Based on `rocm/dev-ubuntu-22.04:7.2` (Ubuntu 22.04 + ROCm 7.2)
+- No FP8 stub patch needed — ROCm 7 HIP has native FP8 types
+- No HIP version-check patch needed — ROCm 7 HIP ≥ 6.1
+- Code object version: ROCm 7 LLVM defaults to COv6 which its runtime supports
+- Tensile backport: gfx900 `.co` files copied from ROCm 6.3.4 rocBLAS package at build time
+
+### Baremetal (requires ROCm 7.x installed on host)
+
+```bash
+# Does tensile backport + builds llama.cpp
+./build/build-llamacpp-rocm7-baremetal.sh
+
+# Skip backport on subsequent runs
+./build/build-llamacpp-rocm7-baremetal.sh --skip-backport
+
+# Verify Vega 8 agent index before running:
+rocminfo | grep -B2 -A5 'gfx90'
+
+export ROCR_VISIBLE_DEVICES=0   # Vega 8 agent index
+export HIP_VISIBLE_DEVICES=0
+export HSA_OVERRIDE_GFX_VERSION=9.0.0
+export HSA_ENABLE_SDMA=0 HSA_XNACK=0 GGML_HIP_UMA=0
+./llm/rocm7-vega/bin/llama-server -m /path/to/model.gguf -ngl 99
+```
+
+---
 
 ## Running
 
@@ -119,7 +169,7 @@ Just re-run:
 The host ROCm stack (HIP 5.7.1) crashes on GPU inference. Use the Docker launcher instead:
 
 ```bash
-./run-docker-rocm.sh ~/models/your-model.gguf -ngl 99 -c 2048 --no-warmup
+./run/run-docker-rocm.sh ~/models/your-model.gguf -ngl 99 -c 2048 --no-warmup
 # Auto-builds the Docker image on first run (~10 min)
 # Server: http://127.0.0.1:8080/v1
 ```
@@ -145,13 +195,13 @@ export HSA_XNACK=0        # 1 hard-freezes Vega 8 PC
 export GGML_HIP_UMA=0     # UMA=1 segfaults when XNACK=0
 export GPU_MAX_ALLOC_PERCENT=100
 
-./llama.cpp-rocm-vega/bin/llama-server \
+./llm/rocm-vega/bin/llama-server \
     -m ~/models/your-model.gguf \
     -ngl 0 \
     --host 0.0.0.0 --port 8080
 ```
 
-> Use `-ngl 0` for CPU-only. Any GPU offload (`-ngl 1+`) will segfault on the host (HIP 5.7.1 mismatch). Use `./run-docker-rocm.sh` for GPU offload.
+> Use `-ngl 0` for CPU-only. Any GPU offload (`-ngl 1+`) will segfault on the host (HIP 5.7.1 mismatch). Use `./run/run-docker-rocm.sh` for GPU offload.
 
 ### Interactive CLI Chat
 
@@ -161,7 +211,7 @@ export HSA_ENABLE_SDMA=0
 export HSA_XNACK=0
 export GGML_HIP_UMA=0
 
-./llama.cpp-rocm-vega/bin/llama-cli \
+./llm/rocm-vega/bin/llama-cli \
     -m ~/models/your-model.gguf \
     -ngl 0 \
     -c 4096 \
@@ -204,8 +254,8 @@ BACKEND="$HOME/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-amd-rocm-avx
 cp -a "$BACKEND" "$BACKEND.bak"
 
 # Replace libs (including versioned symlinks)
-cp -a llama.cpp-rocm-vega/lib/libggml*.so* "$BACKEND/"
-cp -a llama.cpp-rocm-vega/lib/libllama*.so* "$BACKEND/"
+cp -a llm/rocm-vega/lib/libggml*.so* "$BACKEND/"
+cp -a llm/rocm-vega/lib/libllama*.so* "$BACKEND/"
 
 # Fix RUNPATH for dependencies so LM Studio's engine can find them
 for f in "$BACKEND"/*.so; do

@@ -20,8 +20,8 @@ set -euo pipefail
 # ─── Configuration ───
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_BRANCH="master"
-BUILD_DIR="$(dirname "$0")/llama.cpp-build"
-INSTALL_DIR="$(dirname "$0")/llama.cpp-rocm-vega"
+BUILD_DIR="$(dirname "$0")/../llm/build"
+INSTALL_DIR="$(dirname "$0")/../llm/rocm-vega"
 # Target gfx900 (Vega 10) — closest to gfx90c (Vega 8 APU)
 # Use plain "gfx900" without xnack qualifier, matching AMD's own rocBLAS
 # convention (see ROCm/rocBLAS CMakeLists.txt). This produces a generic

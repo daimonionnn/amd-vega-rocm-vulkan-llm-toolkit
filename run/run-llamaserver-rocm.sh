@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-LLAMA_SERVER="$(dirname "$0")/llama.cpp-rocm-vega/bin/llama-server"
+LLAMA_SERVER="$(dirname "$0")/../llm/rocm-vega/bin/llama-server"
 
 if [ ! -x "$LLAMA_SERVER" ]; then
     echo "✗  llama-server not found at: $LLAMA_SERVER"

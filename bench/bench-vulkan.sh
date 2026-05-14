@@ -11,7 +11,7 @@ fi
 MODEL="$1"
 shift
 
-BENCH_BIN="$(dirname "$0")/llama.cpp-vulkan/bin/llama-bench"
+BENCH_BIN="$(dirname "$0")/../llm/vulkan/bin/llama-bench"
 
 if [ ! -x "$BENCH_BIN" ]; then
     echo "✗ Error: $BENCH_BIN not found or not executable."

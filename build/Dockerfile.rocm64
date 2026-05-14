@@ -27,6 +27,11 @@ RUN cmake -B build \
     cmake --build build --config Release -j$(nproc)
 
 # ROCm environment for Vega 8 APU
+# ROCR/HIP_VISIBLE_DEVICES=0: expose only the first GPU agent (Vega 8 iGPU).
+# run-docker-rocm.sh passes only the Vega 8 /dev/dri/renderD* node into the
+# container, so device 0 is always the iGPU, never the Radeon 9700 dGPU.
+ENV ROCR_VISIBLE_DEVICES=0
+ENV HIP_VISIBLE_DEVICES=0
 ENV HSA_OVERRIDE_GFX_VERSION=9.0.0
 ENV HSA_ENABLE_SDMA=0
 # HSA_XNACK=0: prevents PC hang on Vega 8 iGPU (XNACK=1 freezes whole system)

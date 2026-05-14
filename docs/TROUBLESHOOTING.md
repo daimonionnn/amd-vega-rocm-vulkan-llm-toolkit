@@ -5,7 +5,7 @@
 Run the built-in diagnostic mode:
 
 ```bash
-./launch-lmstudio-vulkan.sh --diagnose
+./run/launch-lmstudio-vulkan.sh --diagnose
 ```
 
 This shows:
@@ -13,6 +13,53 @@ This shows:
 - Recent ROCm errors from LM Studio logs
 - Memory information (VRAM/GTT)
 - A recommendation for your hardware
+
+---
+
+## Multi-GPU: Targeting Vega 8 with Radeon 9700 AI Pro also present
+
+With two AMD GPUs (`/dev/dri/renderD128` = Radeon 9700 AI Pro, `/dev/dri/renderD129` = Vega 8 iGPU), ROCm may pick the wrong GPU.
+
+### Docker scripts (automatic)
+
+`run-docker-rocm.sh` and `run-docker-rocm7.sh` auto-detect the Vega 8 by PCI ID:
+
+```bash
+# Auto-detect confirmed: looks for PCI ID 0x1638 (Vega 8)
+./run/run-docker-rocm.sh /path/to/model.gguf
+# → "  Vega 8 render node: /dev/dri/renderD129"
+```
+
+If auto-detect fails (different APU revision / PCI ID):
+```bash
+VEGA8_RENDER_NODE=/dev/dri/renderD129 ./run/run-docker-rocm.sh /path/to/model.gguf
+```
+
+To identify your render nodes:
+```bash
+for node in /sys/class/drm/renderD*/device; do
+    render=$(basename $(dirname "$node"))
+    dev=$(cat "$node/device" 2>/dev/null)
+    vendor=$(cat "$node/vendor" 2>/dev/null)
+    echo "$render  vendor=$vendor  device=$dev"
+done
+# renderD128  vendor=0x1002  device=0x7551   ← Radeon 9700 AI Pro
+# renderD129  vendor=0x1002  device=0x1638   ← Vega 8 iGPU
+```
+
+### Baremetal (manual)
+
+Verify which HSA agent is the Vega 8:
+```bash
+rocminfo | grep -B2 -A8 'gfx90'
+```
+
+Then set before running any ROCm binary:
+```bash
+export ROCR_VISIBLE_DEVICES=0   # index of Vega 8 in rocminfo output
+export HIP_VISIBLE_DEVICES=0
+export HSA_OVERRIDE_GFX_VERSION=9.0.0
+```
 
 ---
 
@@ -28,7 +75,7 @@ llama.cpp abort:98: ROCm error
 
 **Cause:** The ROCm binary doesn't contain kernels for your GPU architecture. LM Studio's ROCm backend has kernels for gfx1030+ only. Your Vega 8 is gfx90c.
 
-**Fix:** Use Vulkan (`./launch-lmstudio-vulkan.sh`) or build llama.cpp with gfx900 (`./build-llamacpp-rocm-vega.sh`).
+**Fix:** Use Vulkan (`./run/launch-lmstudio-vulkan.sh`) or build llama.cpp with gfx900 (`./build/build-llamacpp-rocm-vega.sh`).
 
 ### "hipcc not found"
 
@@ -210,7 +257,7 @@ The host Ubuntu ROCm stack (HIP 5.7.1 + Clang-21) has an unresolvable version mi
 
 **Quick start:**
 ```bash
-./run-docker-rocm.sh /path/to/model.gguf -ngl 99 -c 2048 --no-warmup
+./run/run-docker-rocm.sh /path/to/model.gguf -ngl 99 -c 2048 --no-warmup
 # Server available at http://127.0.0.1:8080
 ```
 
@@ -242,7 +289,7 @@ docker stop $(docker ps -q --filter ancestor=llama-server-rocm-vega)
 **Rebuild image after Dockerfile changes:**
 ```bash
 docker rmi llama-server-rocm-vega
-./run-docker-rocm.sh /path/to/model.gguf ...
+./run/run-docker-rocm.sh /path/to/model.gguf ...
 ```
 
 **Check what's using GPU memory:**
@@ -252,6 +299,39 @@ fuser /dev/kfd /dev/dri/render* | tr ' ' '\n' | sort -u | \
   xargs -I{} sh -c 'echo -n "PID {}: "; cat /proc/{}/cmdline | tr "\0" " "; echo'
 ```
 The desktop compositor (GNOME Shell, Xwayland), VS Code, and Firefox each hold a small amount of VRAM (~1 GiB total). The model itself is the dominant consumer.
+
+---
+
+### ROCm 7.2 Docker: `rocBLAS error: Cannot read TensileLibrary.dat: Illegal seek for GPU arch: gfx900`
+
+Inference completes model loading but crashes on the first matrix multiply:
+
+```
+rocBLAS error: Cannot read /opt/rocm-7.2.0/lib/rocblas/library/TensileLibrary.dat: Illegal seek for GPU arch : gfx900
+```
+
+**Cause:** ROCm 7.x ships `TensileLibrary.dat` without any `gfx900` entries. When rocBLAS looks up kernels for gfx900, it falls through to the lazy loader and looks for `TensileLibrary_lazy_gfx900.dat` — which also doesn't exist in ROCm 7.
+
+**Fix:** The `build/Dockerfile.rocm7-vega` uses a multi-stage build to backport gfx900 tensile files from ROCm 6.3.4:
+
+```dockerfile
+FROM rocm/dev-ubuntu-22.04:6.3.4 AS rocm6-libs
+RUN apt-get update -qq && apt-get install -y rocblas   # not included in base image!
+
+FROM rocm/dev-ubuntu-22.04:7.2
+COPY --from=rocm6-libs /opt/rocm/lib/rocblas/library/ /tmp/rocm6-rocblas/
+RUN # copies *gfx900* files + TensileLibrary_lazy_gfx900.dat to /opt/rocm/lib/rocblas/library/
+```
+
+The key file is `TensileLibrary_lazy_gfx900.dat` — it's the kernel index rocBLAS checks first. The full set of `*gfx900*.co`, `*gfx900*.dat`, and `*gfx900*.hsaco` files must also be present alongside it.
+
+**Note:** The `rocm/dev-ubuntu-22.04:6.3.4` base image does **not** have rocblas installed — `apt-get install rocblas` is required inside that stage or the COPY will produce an empty directory.
+
+Rebuild to apply:
+```bash
+docker rmi llama-rocm7-vega
+docker build -t llama-rocm7-vega -f build/Dockerfile.rocm7-vega build/
+```
 
 ---
 
@@ -339,24 +419,24 @@ ls -t ~/.lmstudio/server-logs/2026-*/*.log | head -1 | xargs grep -i "rocm\|erro
 
 ```bash
 # Check the compiled shared library for gfx900 code objects
-readelf -p .note llama.cpp-rocm-vega/lib/libggml-hip.so 2>/dev/null | grep gfx
+readelf -p .note llm/rocm-vega/lib/libggml-hip.so 2>/dev/null | grep gfx
 # or
-strings llama.cpp-rocm-vega/lib/libggml-hip.so | grep gfx900
+strings llm/rocm-vega/lib/libggml-hip.so | grep gfx900
 ```
 
 ### Verify xnack and Code Object version
 
 ```bash
 # Check xnack status in all code objects
-readelf -n llama.cpp-rocm-vega/lib/libggml-hip.so | grep -o 'xnack[^ ]*' | sort | uniq -c
+readelf -n llm/rocm-vega/lib/libggml-hip.so | grep -o 'xnack[^ ]*' | sort | uniq -c
 # Should show: xnack=on  (NOT xnack=off or xnack=unsupported)
 
 # Check Code Object version (need COv5 for HIP 5.7)
-readelf -h llama.cpp-rocm-vega/lib/libggml-hip.so | grep 'ABI Version'
+readelf -h llm/rocm-vega/lib/libggml-hip.so | grep 'ABI Version'
 # Should show: ABI Version: 3  (COv5, NOT 4 which is COv6)
 
 # Count all ELF code objects and verify they're all correct
-for f in llama.cpp-rocm-vega/lib/libggml-*.so; do
+for f in llm/rocm-vega/lib/libggml-*.so; do
     total=$(readelf -n "$f" 2>/dev/null | grep -c 'gfx900' || echo 0)
     xnack_on=$(readelf -n "$f" 2>/dev/null | grep -c 'xnack=on' || echo 0)
     echo "$f: $total code objects, $xnack_on with xnack=on"
@@ -371,10 +451,10 @@ done
 export HSA_OVERRIDE_GFX_VERSION=9.0.0 HSA_ENABLE_SDMA=0 HSA_XNACK=0 GGML_HIP_UMA=0
 
 # SCALE test (should pass quickly)
-timeout 10 ./llama.cpp-rocm-vega/bin/test-backend-ops -o SCALE -b ROCm0
+timeout 10 ./llm/rocm-vega/bin/test-backend-ops -o SCALE -b ROCm0
 
 # MUL_MAT test (tests all quantization types)
-timeout 60 ./llama.cpp-rocm-vega/bin/test-backend-ops -o MUL_MAT -b ROCm0
+timeout 60 ./llm/rocm-vega/bin/test-backend-ops -o MUL_MAT -b ROCm0
 ```
 
 ---

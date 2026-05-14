@@ -1,0 +1,1 @@
+./run-docker-rocm7.sh /home/matt/.lmstudio/models/lmstudio-community/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-Q4_K_M.gguf -ngl 99 -c 2048 -fa 1
