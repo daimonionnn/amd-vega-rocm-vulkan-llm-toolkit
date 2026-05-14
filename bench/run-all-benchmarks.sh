@@ -23,8 +23,8 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Models to benchmark — comment out any line to skip that model
 MODELS=(
-#    "/home/matt/.lmstudio/models/lmstudio-community/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-Q4_K_M.gguf"
-    "/home/matt/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf"
+    "$HOME/.lmstudio/models/lmstudio-community/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-Q4_K_M.gguf"
+    "$HOME/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf"
 )
 
 # llama-server port (all backends share the same port sequentially)
@@ -45,10 +45,12 @@ GEN_TOKENS=50
 # Where to write per-backend result CSVs  (label, prompt_words, ctx_tokens, prefill, decode)
 RESULTS_DIR="/tmp/bench-results-$(date +%Y%m%d-%H%M%S)"
 
-# Bare-metal ROCm llama-server binaries (leave empty to skip those backends)
-# Set these once host ROCm stack is stable enough to run without Docker.
-ROCM7_LLAMA_BIN=""   # e.g. /opt/rocm7/bin/llama-server  or  llm/rocm7/bin/llama-server
-ROCM6_LLAMA_BIN=""   # e.g. /opt/rocm6/bin/llama-server  or  llm/rocm6/bin/llama-server
+# Bare-metal ROCm llama-server binaries (leave empty to auto-detect default path)
+# Default paths (auto-detected when empty):
+#   ROCm 7: llm/rocm7-vega/bin/llama-server   (built by build/build-llamacpp-rocm7-baremetal.sh)
+#   ROCm 6: llm/rocm-vega/bin/llama-server    (built by build/build-llamacpp-rocm-vega.sh)
+ROCM7_LLAMA_BIN=""   # override: /opt/rocm7/bin/llama-server
+ROCM6_LLAMA_BIN=""   # override: /opt/rocm6/bin/llama-server
 
 # =============================================================================
 # ── ENABLED BACKENDS ─────────────────────────────────────────────────────────
@@ -57,29 +59,29 @@ ROCM6_LLAMA_BIN=""   # e.g. /opt/rocm6/bin/llama-server  or  llm/rocm6/bin/llama
 # =============================================================================
 ENABLED_BACKENDS=(
     # ── ROCm 7.2 via Docker ───────────────────────────────────────────────────
-    "ROCm-7.2-Docker-FA-OFF:-fa 0:start_rocm7_docker"
-    "ROCm-7.2-Docker-FA-ON:-fa 1:start_rocm7_docker"
+    #"ROCm-7.2-Docker-FA-OFF:-fa 0:start_rocm7_docker"
+    #"ROCm-7.2-Docker-FA-ON:-fa 1:start_rocm7_docker"
 
     # ── ROCm 6.2.4 via Docker ────────────────────────────────────────────────
-    "ROCm-6.2.4-Docker-FA-OFF:-fa 0:start_rocm6_docker"
-    "ROCm-6.2.4-Docker-FA-ON:-fa 1:start_rocm6_docker"
+    #"ROCm-6.2.4-Docker-FA-OFF:-fa 0:start_rocm6_docker"
+    #"ROCm-6.2.4-Docker-FA-ON:-fa 1:start_rocm6_docker"
 
-    # ── ROCm 7.2 bare-metal (uncomment when host ROCm stack is working) ──────
-    # "ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"
-    # "ROCm-7.2-Baremetal-FA-ON:-fa 1:start_rocm7_baremetal"
+    # ── ROCm 7.2 bare-metal ─────────────────────────────────────────────────
+    "ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"
+    "ROCm-7.2-Baremetal-FA-ON:-fa 1:start_rocm7_baremetal"
 
     # ── ROCm 6.2.4 bare-metal (uncomment when host ROCm stack is working) ────
     # "ROCm-6.2.4-Baremetal-FA-OFF:-fa 0:start_rocm6_baremetal"
     # "ROCm-6.2.4-Baremetal-FA-ON:-fa 1:start_rocm6_baremetal"
 
     # ── Vulkan (native, GPU offload) ──────────────────────────────────────────
-    "Vulkan-GPU-FA-OFF:-fa 0:start_vulkan_gpu"
+    #"Vulkan-GPU-FA-OFF:-fa 0:start_vulkan_gpu"
     # Vulkan flash attention is less impactful — uncomment to test:
-    "Vulkan-GPU-FA-ON:-fa 1:start_vulkan_gpu"
+    #"Vulkan-GPU-FA-ON:-fa 1:start_vulkan_gpu"
 
     # ── CPU only (no GPU offload) ─────────────────────────────────────────────
-    "CPU-FA-ON:-fa 1:start_cpu"
-    "CPU-FA-OFF:-fa 0:start_cpu"
+    #"CPU-FA-ON:-fa 1:start_cpu"
+    #"CPU-FA-OFF:-fa 0:start_cpu"
 )
 
 # =============================================================================
@@ -156,23 +158,32 @@ start_rocm6_docker() {
 }
 
 # ── Bare-metal ROCm backends ──────────────────────────────────────────────────
-# These require the host ROCm stack to be working (currently: host HIP 5.7.1 +
-# Clang-21 segfaults at slot init — use Docker variants above instead).
-# Fill in ROCM7_LLAMA_BIN / ROCM6_LLAMA_BIN paths once bare-metal builds exist.
+# Requires ROCm installed on the host and llama.cpp built for gfx900.
+# Setup: bash setup/install-rocm7-host.sh && bash build/build-llamacpp-rocm7-baremetal.sh
+# The HSA_OVERRIDE_GFX_VERSION=9.0.0 override tells the ROCm runtime that Vega 8 APU
+# (gfx90c) should use gfx900 kernels (which we backport from ROCm 6.3.4).
 
 start_rocm7_baremetal() {
     local fa_flag="$1"
-    if [[ -z "$ROCM7_LLAMA_BIN" || ! -x "$ROCM7_LLAMA_BIN" ]]; then
-        echo "  [skip] ROCm 7.2 bare-metal: ROCM7_LLAMA_BIN not set or not executable"
-        echo "         Set ROCM7_LLAMA_BIN at the top of this script."
+    local bin="${ROCM7_LLAMA_BIN:-$REPO_DIR/llm/rocm7-vega/bin/llama-server}"
+    if [[ ! -x "$bin" ]]; then
+        echo "  [skip] ROCm 7.2 bare-metal: binary not found at $bin"
+        echo "         Run: bash setup/install-rocm7-host.sh && bash build/build-llamacpp-rocm7-baremetal.sh"
         SERVER_PID=""
         return 1
     fi
-    echo "  [start] ROCm 7.2 — bare-metal ($ROCM7_LLAMA_BIN) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
+    echo "  [start] ROCm 7.2 — bare-metal ($bin) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     sleep 1
-    ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 \
-        "$ROCM7_LLAMA_BIN" \
+    ROCR_VISIBLE_DEVICES=1 \
+    HIP_VISIBLE_DEVICES=0 \
+    HSA_OVERRIDE_GFX_VERSION=9.0.0 \
+    HSA_ENABLE_SDMA=0 \
+    HSA_XNACK=0 \
+    GGML_HIP_UMA=1 \
+    GPU_MAX_ALLOC_PERCENT=100 \
+    LD_LIBRARY_PATH="$(dirname "$(dirname "$bin")")/lib:/opt/rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$bin" \
         -m "$CURRENT_MODEL" \
         $fa_flag \
         -ngl 99 \
@@ -195,7 +206,7 @@ start_rocm6_baremetal() {
     echo "  [start] ROCm 6.2.4 — bare-metal ($ROCM6_LLAMA_BIN) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     sleep 1
-    ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 \
+    ROCR_VISIBLE_DEVICES=1 HIP_VISIBLE_DEVICES=0 \
         "$ROCM6_LLAMA_BIN" \
         -m "$CURRENT_MODEL" \
         $fa_flag \

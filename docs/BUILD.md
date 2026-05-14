@@ -6,13 +6,15 @@ Building llama.cpp from source with ROCm/HIP support for the AMD Vega 8 APU (gfx
 
 LM Studio's bundled ROCm backend only includes kernels for RDNA2+ GPUs (gfx1030 and newer). The Vega 8 iGPU uses the GCN 5 architecture (gfx90c), which isn't supported. Building llama.cpp ourselves lets us target `gfx900` — the closest official ROCm target to gfx90c.
 
-> **Status (May 2026):** Native host ROCm GPU inference crashes (HIP 5.7.1/Clang-21 mismatch on Ubuntu 25.10). Two Docker solutions are available and confirmed working:
-> - **ROCm 6.2.4 Docker** (`./run/run-docker-rocm.sh`) — stable, full GPU offload confirmed
-> - **ROCm 7.2 Docker** (`./run/run-docker-rocm7.sh`) — confirmed working 2026-05-14, 35B full offload + sustained inference stable, gfx900 tensile backport (`TensileLibrary_lazy_gfx900.dat` + `*gfx900*` kernels from ROCm 6.3.4)
+> **Status (May 2026):**
+> - **Host HIP 5.7.1 is broken** — Ubuntu 25.10 ships HIP 5.7.1/Clang-21, a ~2 major version mismatch; GPU inference segfaults. Do not use `run-llamaserver-rocm.sh` for GPU offload.
+> - **ROCm 6.2.4 Docker** (`./run/run-docker-rocm.sh`) — stable, full GPU offload confirmed.
+> - **ROCm 7.2 Docker** (`./run/run-docker-rocm7.sh`) — confirmed working 2026-05-14, 35B full offload stable, gfx900 tensile backport applied.
+> - **ROCm 7.2 Baremetal** — **confirmed working** 2026-05-14. Install via `setup/install-rocm7-host.sh`, build via `build-llamacpp-rocm7-baremetal.sh`, run via `run/run-rocm7-baremetal.sh`. Two Ubuntu 25.10 workarounds needed (see [Baremetal Prerequisites](#baremetal-prerequisites-ubuntu-2510) below).
 >
-> For native GPU inference without Docker, **use Vulkan** — see [ARCHITECTURE.md](ARCHITECTURE.md#rocm-runtime-crash-analysis).
+> For native GPU inference without ROCm, **use Vulkan** — see [ARCHITECTURE.md](ARCHITECTURE.md#rocm-runtime-crash-analysis).
 >
-> **Multi-GPU note:** With AMD Radeon 9700 AI Pro also present, both Docker scripts auto-detect the Vega 8 render node by PCI ID (`0x1638`, `/dev/dri/renderD129`) and pass only that device into the container.
+> **Multi-GPU note:** With AMD Radeon 9700 AI Pro also present, both Docker scripts auto-detect the Vega 8 render node by PCI ID (`0x1638`, `/dev/dri/renderD129`) and pass only that device into the container. In baremetal mode, `ROCR_VISIBLE_DEVICES=1` selects Vega 8 (GPU 0 = gfx1201 RX 9700, GPU 1 = gfx90c Vega 8).
 
 ## Prerequisites
 
@@ -141,24 +143,51 @@ Key differences from ROCm 6 Docker:
 - Code object version: ROCm 7 LLVM defaults to COv6 which its runtime supports
 - Tensile backport: gfx900 `.co` files copied from ROCm 6.3.4 rocBLAS package at build time
 
-### Baremetal (requires ROCm 7.x installed on host)
+### Baremetal (ROCm 7.2 confirmed working on Ubuntu 25.10)
+
+#### Baremetal Prerequisites (Ubuntu 25.10)
+
+Ubuntu 25.10 isn't officially supported by AMD. Two workarounds are needed:
+
+**1. Use AMD's noble (24.04) packages — ABI-compatible with 25.10:**
+```bash
+sudo bash setup/install-rocm7-host.sh
+```
+This adds the ROCm 7.2 apt repo pinned to `noble`, installs ~29 packages including `hip-dev` and `hsa-rocr-dev`.
+
+**2. libxml2 soname compatibility symlink** (Ubuntu 25.10 renamed `.so.2` → `.so.16`):
+```bash
+sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2
+```
+ROCm LLVM's linker (`lld`) was built against `libxml2.so.2`. Without this symlink, CMake's HIP compiler test fails.
+
+#### Build and Run
 
 ```bash
-# Does tensile backport + builds llama.cpp
-./build/build-llamacpp-rocm7-baremetal.sh
+# Build (add --skip-backport on subsequent runs once tensile files are installed)
+export PATH=/opt/rocm/bin:$PATH
+bash build/build-llamacpp-rocm7-baremetal.sh
+bash build/build-llamacpp-rocm7-baremetal.sh --skip-backport  # subsequent runs
 
-# Skip backport on subsequent runs
-./build/build-llamacpp-rocm7-baremetal.sh --skip-backport
-
-# Verify Vega 8 agent index before running:
+# Verify GPU indices (RX 9700 = index 0, Vega 8 = index 1 on this system)
 rocminfo | grep -B2 -A5 'gfx90'
 
-export ROCR_VISIBLE_DEVICES=0   # Vega 8 agent index
-export HIP_VISIBLE_DEVICES=0
+# Run via the wrapper script (auto-detects Vega 8 index)
+bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192
+
+# Or manually:
+export ROCR_VISIBLE_DEVICES=1   # Vega 8 is GPU index 1 (verify: rocminfo shows gfx90c as second GPU)
+export HIP_VISIBLE_DEVICES=0    # Relative index within ROCR_VISIBLE_DEVICES mask
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
-export HSA_ENABLE_SDMA=0 HSA_XNACK=0 GGML_HIP_UMA=0
+export HSA_ENABLE_SDMA=0
+export HSA_XNACK=0
+export GGML_HIP_UMA=1           # Required for iGPU UMA — model weights via CPU-mapped pointers
+export GPU_MAX_ALLOC_PERCENT=100
+export LD_LIBRARY_PATH="$PWD/llm/rocm7-vega/lib:/opt/rocm/lib"
 ./llm/rocm7-vega/bin/llama-server -m /path/to/model.gguf -ngl 99
 ```
+
+> **Confirmed:** Binary detects `AMD Radeon Graphics, gfx900:xnack-` with 65536 MiB VRAM (full 64 GB GTT).
 
 ---
 

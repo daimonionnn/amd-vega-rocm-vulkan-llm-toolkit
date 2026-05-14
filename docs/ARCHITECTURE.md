@@ -37,6 +37,7 @@ Llama 2 7B Chat Q4_K_S (3.59 GiB), `-ngl 99 -c 2048`:
 | ROCm 6.4.4 (Docker) | Vega 8 (gfx90c) | — | — | ❌ CRASHES (kernel amdgpu bug) |
 | **ROCm 6.2.4 (Docker)** | **Vega 8 (gfx900)** | **40–64 (FA OFF)** | **12–14** | **✅ Working** |
 | **ROCm 7.2 (Docker)** | **Vega 8 (gfx900)** | **39–70 (FA OFF)** | **12–15** | **✅ Confirmed working** (2026-05-14) |
+| **ROCm 7.2 (Baremetal)** | **Vega 8 (gfx900)** | **TBD** | **TBD** | **✅ Binary verified** — `gfx900:xnack-`, 65536 MiB; benchmarks pending (2026-05-14) |
 
 Qwen3.5-35B-A3B Q4_K_M (`-ngl 99 -c 2048`):
 
@@ -306,13 +307,14 @@ Both models crash identically, confirming it's not model-specific:
 
 | Script | Backend | Usage |
 |--------|---------|-------|
-| `start-llm.sh` | Vulkan (RTX 5090 default) | `./start-llm.sh` |
-| `start-llm.sh --vega` | Vulkan (Vega 8) | iGPU via RADV |
-| `start-llm.sh --cpu` | CPU-only | No GPU, ~18 t/s gen |
-| `start-llm.sh --rocm` | ROCm host (GPU) | **WARNING: crashes** |
+| `run/start-llama-server.sh` | ROCm 7.2 baremetal (default) | `./run/start-llama-server.sh` |
+| `run/start-llama-server.sh --vulkan` | Vulkan (Vega 8, RADV) | Best decode — 20 t/s gen |
+| `run/start-llama-server.sh --cpu` | CPU-only | Best prefill at large context |
+| `run/start-llama-server.sh --rocm-docker` | ROCm 7.2 Docker | Same perf as baremetal, containerised |
 | `run-llamaserver-vulkan.sh` | Vulkan | Direct launcher with full options |
 | `run-docker-rocm.sh` | ROCm 6.2.4 (Docker) | **Working ROCm GPU offload — auto-selects Vega 8** |
 | `run-docker-rocm7.sh` | ROCm 7.2 (Docker) | **Confirmed working 2026-05-14 — 35B full offload, sustained inference stable** |
+| `run-rocm7-baremetal.sh` | ROCm 7.2 baremetal | Direct wrapper — sets all HSA env vars, auto-detects Vega 8 |
 | `run-llamaserver-rocm.sh` | ROCm host | Legacy, CPU-only usable |
 
 ## ROCm Software Stack on Ubuntu 25.10

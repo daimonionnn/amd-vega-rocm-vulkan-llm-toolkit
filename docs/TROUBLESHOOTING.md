@@ -56,9 +56,18 @@ rocminfo | grep -B2 -A8 'gfx90'
 
 Then set before running any ROCm binary:
 ```bash
-export ROCR_VISIBLE_DEVICES=0   # index of Vega 8 in rocminfo output
-export HIP_VISIBLE_DEVICES=0
+# With RX 9700 AI Pro also present: GPU 0 = gfx1201 (RX 9700), GPU 1 = gfx90c (Vega 8)
+export ROCR_VISIBLE_DEVICES=1   # index of Vega 8 — verify with rocminfo (may differ on your system)
+export HIP_VISIBLE_DEVICES=0    # relative index within ROCR_VISIBLE_DEVICES mask
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
+export GGML_HIP_UMA=1           # required for iGPU UMA (shared system RAM)
+export HSA_ENABLE_SDMA=0
+export HSA_XNACK=0
+```
+
+Or simply use the wrapper script which auto-detects the correct index:
+```bash
+bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99
 ```
 
 ---

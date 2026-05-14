@@ -40,8 +40,8 @@ set -euo pipefail
 # ─── Config ──────────────────────────────────────────────────────────────────
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_BRANCH="master"
-BUILD_DIR="$(dirname "$0")/../llm/build"
-INSTALL_DIR="$(dirname "$0")/../llm/rocm7-vega"
+BUILD_DIR="$(realpath -m "$(dirname "$0")/../llm/build")"
+INSTALL_DIR="$(realpath -m "$(dirname "$0")/../llm/rocm7-vega")"
 AMDGPU_TARGET="gfx900"
 JOBS=$(nproc)
 SKIP_BACKPORT=false
@@ -91,7 +91,7 @@ check_prereqs() {
         echo "   Install ROCm 7.x: https://rocm.docs.amd.com/en/latest/deploy/linux/index.html"
         ok=false
     else
-        ROCM_VER="$("$ROCM_PATH/bin/rocminfo" 2>/dev/null | grep -m1 'Version:' | awk '{print $2}' || echo 'unknown')"
+        ROCM_VER="$(cat "$ROCM_PATH/.info/version" 2>/dev/null || "$ROCM_PATH/bin/rocminfo" 2>/dev/null | grep -m1 'ROCk module' | awk '{print $4}' || echo 'unknown')"
         echo "✓  ROCm found at $ROCM_PATH  (version: $ROCM_VER)"
         # Warn if not ROCm 7.x
         if [[ "$ROCM_VER" != 7.* ]] && [[ "$ROCM_VER" != "unknown" ]]; then
@@ -146,8 +146,12 @@ backport_tensile_libs() {
     echo ""
 
     # Find the rocBLAS library directory in the active ROCm install
-    ROCBLAS_LIB_DIR="$(find "$ROCM_PATH" -maxdepth 4 -type d -name library 2>/dev/null \
-                       | grep rocblas | head -1)"
+    # (use -L to follow symlinks; /opt/rocm is often a symlink itself)
+    if [ -d "${ROCM_PATH}/lib/rocblas/library" ]; then
+        ROCBLAS_LIB_DIR="${ROCM_PATH}/lib/rocblas/library"
+    else
+        ROCBLAS_LIB_DIR="$(find -L "$ROCM_PATH" -maxdepth 6 -type d -path '*/rocblas/library' 2>/dev/null | head -1 || true)"
+    fi
     if [ -z "$ROCBLAS_LIB_DIR" ]; then
         echo "✗  Could not locate rocBLAS library directory under $ROCM_PATH"
         echo "   Install: sudo apt install rocblas"
@@ -163,18 +167,17 @@ backport_tensile_libs() {
         return
     fi
 
-    TMPDIR="$(mktemp -d /tmp/rocblas634.XXXXXX)"
-    trap "rm -rf $TMPDIR" EXIT
+    WORK_TMPDIR="$(mktemp -d /tmp/rocblas634.XXXXXX)"
+    trap "rm -rf $WORK_TMPDIR" EXIT
 
     echo "  Downloading rocBLAS 6.3.4 package from AMD repo..."
-    cd "$TMPDIR"
+    cd "$WORK_TMPDIR"
 
     # Fetch package list and find the rocblas .deb URL
     PKGLIST_URL="${ROCM634_REPO}/dists/${ROCM634_DISTRO}/main/binary-amd64/Packages"
     wget -q "$PKGLIST_URL" -O Packages
 
-    ROCBLAS_PKG_PATH="$(grep -A5 '^Package: rocblas$' Packages | grep '^Filename:' \
-                        | head -1 | awk '{print $2}')"
+    ROCBLAS_PKG_PATH="$(grep -A5 '^Package: rocblas$' Packages | grep '^Filename:' | head -1 | awk '{print $2}' || true)"
     if [ -z "$ROCBLAS_PKG_PATH" ]; then
         echo "✗  Could not find rocblas package in ${ROCM634_REPO}"
         echo "   Try '--skip-backport' if you have gfx900 tensile files already."
@@ -283,7 +286,7 @@ echo ""
 echo "  Run with required environment variables:"
 echo "  (Vega 8 iGPU — verify its index: rocminfo | grep -B2 -A5 'gfx90')"
 echo ""
-echo "    export ROCR_VISIBLE_DEVICES=0   # index of Vega 8; adjust if needed"
+echo "    export ROCR_VISIBLE_DEVICES=1   # Vega 8 is GPU index 1 (verify with rocminfo)"
 echo "    export HIP_VISIBLE_DEVICES=0"
 echo "    export HSA_OVERRIDE_GFX_VERSION=9.0.0"
 echo "    export HSA_ENABLE_SDMA=0"
