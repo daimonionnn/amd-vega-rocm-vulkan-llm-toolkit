@@ -99,18 +99,39 @@ APUs like the Ryzen 5700G use **Unified Memory Architecture** — the GPU shares
 - Fastest access for GPU (direct, no translation needed)
 
 ### GTT (Graphics Translation Table)
-- Dynamically managed by the kernel
-- Raised to **64 GB** on this system with `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
-- Backed by system RAM with GPU-accessible page table mappings
-- Slightly slower than VRAM due to translation overhead
-- Appears as "GTT" in `rocm-smi`; llama.cpp reports the Vega 8 as `gfx900:xnack-` with 65536 MiB visible
+- Dynamically managed by the kernel.
+- Default is often 8GB or 16GB, but can be raised to **64 GB** with `amdgpu.gttsize=65536 ttm.pages_limit=16777216` (only needed for models > 16GB).
+- Backed by system RAM with GPU-accessible page table mappings.
+- **Performance consideration:** Expanding this to 64GB induces translation overhead. Benchmarks show a ~15-20% drop in generation speed (t/s) when running the 64GB GTT over falling back to the 16GB limit, likely due to page fault/translation efficiency on the memory controller.
+- Appears as "GTT" in `rocm-smi`; llama.cpp reports the Vega 8 as `gfx900:xnack-` with 65536 MiB visible (if tuned) or 16384 MiB visible (by default).
 
 ### Implications for LLM Inference
 
-- `GGML_HIP_UMA=1` tells llama.cpp this is a UMA system — it can use both VRAM and GTT
-- `GPU_MAX_ALLOC_PERCENT=100` prevents the runtime from capping allocation at 75%
-- ROCm-visible memory after tuning: **~64 GB GTT** on this machine
+- `GGML_HIP_UMA=1` tells llama.cpp this is a UMA system — it can use both VRAM and GTT.
+- `GPU_MAX_ALLOC_PERCENT=100` prevents the runtime from capping allocation at 75%.
+- ROCm-visible memory varies based on GRUB tuning: **~16 GB default** vs **~64 GB GTT** when tuned. Use the 64GB tune *only* for huge models.
 - Practical limit depends on system RAM pressure from other processes
+
+#### Investigation: `GGML_HIP_UMA=0` (Dedicated VRAM mode)
+
+**Hypothesis:** The Vega 8 APU has a 16 GB BIOS-reserved framebuffer carveout. Setting `GGML_HIP_UMA=0` causes llama.cpp to use `hipMalloc` (the discrete-GPU VRAM path) instead of `hipMallocManaged` (the unified memory path). For small models like Gemma 4 E4B (~3.5 GB GPU buffer), this might improve memory bandwidth and throughput by using the dedicated VRAM chunk.
+
+**Result: No difference via UMA parameter local override, but system-wide GTT limit has a massive impact.**
+
+| Mode | FA | Prefill ~128 | Prefill ~1024 | Decode ~128 | Decode ~1024 |
+| ---- | -- | ------------ | ------------- | ----------- | ------------ |
+| `GGML_HIP_UMA=1` (64GB GTT override enabled) | OFF | 69.7 | 83.1 | 14.0 | 12.6 |
+| `GGML_HIP_UMA=0` (64GB GTT override enabled) | OFF | 68.9 | 84.0 | 13.9 | 12.6 |
+| `GGML_HIP_UMA=1` (16GB default GTT size limit)| OFF | 76.8 | 89.6 | 15.7 | 14.3 |
+
+**Root Cause & Hardware Reality:**
+Confirmed by inspection of the `llama-server` startup logs and `rocminfo`. Even when forced to use `GGML_HIP_UMA=0`, the ROCm HSA runtime reports `VRAM: 65536 MiB` (combining the memory into a single global pool). 
+
+Why does ROCm do this, and why wouldn't "VRAM" give a speedup?
+- **No Physical VRAM:** On a Vega 8 APU, the 16 GB "VRAM" is just a BIOS-reserved chunk of standard system DDR4 RAM. It is not dedicated high-speed GDDR6 like on a discrete GPU.
+- **Identical Bandwidth:** Because both the 16 GB BIOS carveout and the 64 GB shared UMA/GTT pool live on the exact same physical memory sticks and route through the exact same CPU memory controller, they share the exact same maximum bandwidth (~45-50 GB/s on dual-channel DDR4).
+- **HSA Architecture:** ROCm's Heterogeneous System Architecture (HSA) runtime automatically merges these pools on APUs to maximize memory capacity. The 16 GB carveout is merely a memory map reservation trick; it has no separate or faster bandwidth path.
+- **Conclusion:** Forcing allocations into the "16 GB carveout" is virtually impossible via ROCm on an APU because the topology merges them — and it wouldn't improve speed even if you could. It would only artificially break the ability to run large models like Qwen 35B (which require ~20 GB). `GGML_HIP_UMA=1` must remain the default.
 
 ## Vulkan vs ROCm on This System
 

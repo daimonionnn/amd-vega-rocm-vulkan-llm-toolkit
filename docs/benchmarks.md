@@ -32,7 +32,7 @@ ENABLED_BACKENDS=(
     "ROCm-7.2-Docker-FA-ON:-fa 1:start_rocm7_docker"
     "ROCm-6.2.4-Docker-FA-OFF:-fa 0:start_rocm6_docker"
     "ROCm-6.2.4-Docker-FA-ON:-fa 1:start_rocm6_docker"
-    # "ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"   # set ROCM7_LLAMA_BIN first
+    "ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"   # set ROCM7_LLAMA_BIN first
     # "ROCm-6.2.4-Baremetal-FA-OFF:-fa 0:start_rocm6_baremetal" # set ROCM6_LLAMA_BIN first
     "Vulkan-GPU-FA-OFF:-fa 0:start_vulkan_gpu"
     "CPU-FA-ON:-fa 1:start_cpu"
@@ -74,6 +74,8 @@ python3 bench/test-server-perf.py
 **Tool:** `test-server-perf.py` — three context sizes: 128, 1024, 4096 tokens
 
 ### Hardware
+
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
 
 | Component | Details                                            |
 | --------- | -------------------------------------------------- |
@@ -138,6 +140,8 @@ python3 bench/test-server-perf.py
 
 ### Hardware
 
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
+
 | Component | Details                                                  |
 | --------- | -------------------------------------------------------- |
 | GPU       | AMD Radeon Graphics (Vega 8 iGPU, gfx90c)                |
@@ -181,6 +185,8 @@ python3 bench/test-server-perf.py
 **Tool:** `test-server-perf.py` — three context sizes: 128, 1024, 4096 tokens
 
 ### Hardware
+
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
 
 | Component | Details                                            |
 | --------- | -------------------------------------------------- |
@@ -240,6 +246,8 @@ LD_LIBRARY_PATH=llm/vulkan/lib llm/vulkan/bin/llama-server -m .../Qwen3.5-35B-A3
 
 ### Hardware
 
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
+
 | Component | Details                                           |
 | --------- | ------------------------------------------------- |
 | GPU       | AMD Radeon Graphics (Vega 8 iGPU, gfx90c)         |
@@ -284,6 +292,8 @@ LM Studio local server — Vulkan backend, default settings, model loaded via UI
 **Tool:** `test-server-perf.py` — three context sizes: 128, 1024, 4096 tokens
 
 ### Hardware
+
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
 
 | Component | Details                                                                                 |
 | --------- | --------------------------------------------------------------------------------------- |
@@ -341,62 +351,6 @@ Note: `-fa 0` overrides the `-fa 1` baked into `run/run-docker-rocm7.sh` (last f
 
 ---
 
-## ROCm 7.2 (Docker) — Confirmed Working (Earlier Tests)
-
-**Date:** 2026-05-14 (updated)
-**Status:** Full benchmark above — historical first-run notes below
-
-### Hardware
-
-| Component   | Details                                                                                                                                               |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GPU         | AMD Radeon Vega 8 iGPU (`/dev/dri/renderD129`, gfx900:xnack-)                                                                                         |
-| VRAM        | 65536 MiB (64 GB GTT / UMA)                                                                                                                           |
-| Backend     | ROCm 7.2 Docker (`Dockerfile.rocm7-vega`) with gfx900 tensile backport from ROCm 6.3.4                                                                |
-| Tensile fix | `TensileLibrary_lazy_gfx900.dat` + all `*gfx900*` `.co`/`.dat`/`.hsaco` files copied from ROCm 6.3.4 rocBLAS (installed via multi-stage Docker build) |
-
-### Models Tested
-
-**Run 1 — 2026-05-13:**
-
-| Field            | Value                           |
-| ---------------- | ------------------------------- |
-| Model            | `TheBloke/Llama-2-7B-Chat-GGUF` |
-| File             | `llama-2-7b-chat.Q4_K_S.gguf`   |
-| Quantization     | Q4_K_S                          |
-| Size             | 3.59 GiB                        |
-| Layers offloaded | 33/33 (full GPU offload)        |
-| GPU model buffer | 3607 MiB                        |
-
-**Run 2 — 2026-05-14 (updated, 35B model, sustained inference):**
-
-| Field             | Value                                     |
-| ----------------- | ----------------------------------------- |
-| Model             | `lmstudio-community/Qwen3.5-35B-A3B-GGUF` |
-| File              | `Qwen3.5-35B-A3B-Q4_K_M.gguf`             |
-| Quantization      | Q4_K_M                                    |
-| Size              | ~20 GB                                    |
-| Layers offloaded  | 41/41 (full GPU offload)                  |
-| GPU model buffer  | 19905 MiB (~19.5 GB)                      |
-| CPU mapped buffer | 273 MiB                                   |
-
-### Confirmed Output (35B run — 2026-05-14)
-
-```
-Vega 8 render node: /dev/dri/renderD129
-ggml_cuda_init: found 1 ROCm devices (Total VRAM: 65536 MiB):
-  Device 0: , gfx900:xnack- (0x900), VMM: no, Wave Size: 64, VRAM: 65536 MiB
-load_tensors: offloading output layer to GPU
-load_tensors: offloading 39 repeating layers to GPU
-load_tensors: offloaded 41/41 layers to GPU
-load_tensors:   CPU_Mapped model buffer size =   272.81 MiB
-load_tensors:        ROCm0 model buffer size = 19905.15 MiB
-llama_context: flash_attn = enabled
-main: server is listening on http://0.0.0.0:8080
-```
-
-Sustained inference confirmed: 800+ tokens generated (`POST /v1/chat/completions`) with no rocBLAS crash.
-
 ### Notes
 
 - ROCm 7.2 confirmed working on Vega 8 — same approach as ROCm 6.2.4 but with newer HIP/LLVM toolchain
@@ -413,6 +367,8 @@ Sustained inference confirmed: 800+ tokens generated (`POST /v1/chat/completions
 **Tool:** `bench/run-all-benchmarks.sh` (ROCm 7.2 Baremetal backends only)
 
 ### Hardware
+
+> **Memory Config:** APU memory allocated to 2GB + GRUB option set to `amdgpu.gttsize=65536 ttm.pages_limit=16777216`
 
 | Component | Details                                                                                                    |
 | --------- | ---------------------------------------------------------------------------------------------------------- |
@@ -520,10 +476,12 @@ Settings: `-c 8192 --no-warmup` · `-ngl 99` (GPU) · `-ngl 0` (CPU)
 
 ### Hardware
 
+> **Memory Config:** APU memory set to 16GB and removed `amdgpu.gttsize=65536 ttm.pages_limit=16777216` from GRUB
+
 | Component | Details                                                   |
 | --------- | --------------------------------------------------------- |
 | GPU       | AMD Radeon Graphics (Vega 8 iGPU, gfx90c / RADV RENOIR)  |
-| VRAM      | 65536 MiB (64 GB GTT — system RAM mapped via UMA)         |
+| VRAM      | 16384 MiB (16 GB BIOS carveout — `amdgpu.gttsize=65536` removed) |
 | CPU       | AMD Ryzen 7 5700G (8C/16T, Zen 3, AVX2/FMA)              |
 
 ### Model
@@ -643,45 +601,42 @@ Settings: `-c 8192 --no-warmup` · `-ngl 99` (GPU) · `-ngl 0` (CPU) · Vulkan p
 
 | Backend                  | FA        | ~128 tok | ~1024 tok | ~4096 tok | Notes                                                         |
 | ------------------------ | --------- | -------- | --------- | --------- | ------------------------------------------------------------- |
-| **CPU** (`-ngl 0`)       | **ON** ✅  | **257**  | **811**   | **923**   | Best prefill overall; AVX2 SDPA scales ~3.6× with context     |
-| CPU (`-ngl 0`)           | OFF       | 241      | 740       | 838       | Use `-fa 1` instead                                           |
-| **Vulkan** (`-ngl 99`)   | **ON** ✅  | 116      | **159**   | **156**   | FA ON adds +43% at 128 tok, +21% at 4K vs FA OFF              |
-| Vulkan (`-ngl 99`)       | OFF       | 81       | 131       | 138       |                                                               |
-| **ROCm 7.2** (Docker)    | **OFF** ✅ | 68       | 81        | 81        | Flat above 1K tokens; better decode than ROCm 6               |
-| ROCm 7.2 (Docker)        | ON ⚠      | 61       | 43        | 26        | FA ON severely hurts at ≥1K tokens                            |
-| **ROCm 7.2** (Baremetal) | **OFF** ✅ | 68       | 82        | 82        | Near-identical to Docker; HSA_ENABLE_SDMA+XNACK no-op          |
-| ROCm 7.2 (Baremetal)     | ON ⚠      | 61       | 44        | 26        | FA ON severely hurts at ≥1K tokens                            |
-| **ROCm 6.2.4** (Docker)  | **OFF** ✅ | 67       | 80        | 80        | ~1 t/s behind ROCm 7 on prefill                               |
-| ROCm 6.2.4 (Docker)      | ON ⚠      | 59       | 41        | 23        | FA ON severely hurts at ≥1K tokens                            |
+| **CPU** (`-ngl 0`)       | **ON** ✅  | **248**  | **748**   | **839**   | Best prefill overall; AVX2 SDPA scales ~3.4× with context     |
+| CPU (`-ngl 0`)           | OFF       | 232      | 691       | 768       | Use `-fa 1` instead                                           |
+| **Vulkan** (`-ngl 99`)   | **ON** ✅  | 126      | **173**   | **170**   | Consistent improvement across contexts vs FA OFF              |
+| Vulkan (`-ngl 99`)       | OFF       | 93       | 148       | 152       |                                                               |
+| **ROCm 7.2** (Baremetal) | **OFF** ✅ | 76       | 89        | 89        | Flat above 1K tokens                                          |
+| ROCm 7.2 (Baremetal)     | ON ⚠      | 68       | 48        | 28        | FA ON severely hurts at ≥1K tokens                            |
+| **ROCm 7.2** (Docker)    | **OFF** ✅ | 68       | 81        | 81        | *(Historical: 64GB GTT run — ~10% slower)*                    |
+| ROCm 7.2 (Docker)        | ON ⚠      | 61       | 43        | 26        | *(Historical: 64GB GTT run)*                                  |
+| **ROCm 6.2.4** (Docker)  | **OFF** ✅ | 67       | 80        | 80        | *(Historical: 64GB GTT run)*                                  |
+| ROCm 6.2.4 (Docker)      | ON ⚠      | 59       | 41        | 23        | *(Historical: 64GB GTT run)*                                  |
 
 ### Generation (Decode) — t/s  *(higher is better)*
 
 | Backend                  | FA        | ~128 tok | ~1024 tok | ~4096 tok | Notes                                       |
 | ------------------------ | --------- | -------- | --------- | --------- | ------------------------------------------- |
-| **Vulkan** (`-ngl 99`)   | **ON** ✅  | **14.7** | **14.6**  | **14.0**  | Best decode; FA ON also improves decode     |
-| Vulkan (`-ngl 99`)       | OFF       | 14.4     | 13.5      | 11.9      |                                             |
-| **ROCm 7.2** (Docker)    | **OFF** ✅ | 13.1     | 11.9      | 9.8       | Best ROCm decode option                     |
-| ROCm 7.2 (Docker)        | ON        | 13.2     | 12.2      | 10.4      |                                             |
-| **ROCm 7.2** (Baremetal) | **OFF** ✅ | 13.3     | 12.2      | 10.0      | Within noise of Docker on decode            |
-| ROCm 7.2 (Baremetal)     | ON        | 13.3     | 12.5      | 10.7      |                                             |
-| **CPU** (`-ngl 0`)       | ON        | 12.3     | 11.9      | 10.1      | UMA bandwidth bound — nearly matches GPU    |
-| CPU (`-ngl 0`)           | OFF       | 12.4     | 12.0      | 11.2      |                                             |
-| **ROCm 6.2.4** (Docker)  | **OFF** ✅ | 10.6     | 9.7       | 8.3       |                                             |
-| ROCm 6.2.4 (Docker)      | ON        | 10.8     | 10.2      | 8.9       |                                             |
+| **Vulkan** (`-ngl 99`)   | **ON** ✅  | **17.4** | **17.0**  | **16.8**  | Best decode; FA ON also improves decode     |
+| Vulkan (`-ngl 99`)       | OFF       | 17.3     | 16.3      | 14.1      |                                             |
+| **ROCm 7.2** (Baremetal) | ON        | 15.9     | 14.7      | 12.4      | Decode slightly higher with FA ON here      |
+| **ROCm 7.2** (Baremetal) | **OFF** ✅ | 15.6     | 14.3      | 11.6      |                                             |
+| **CPU** (`-ngl 0`)       | ON        | 14.7     | 13.8      | 12.0      | CPU decode improved with 16GB limit         |
+| CPU (`-ngl 0`)           | OFF       | 14.4     | 13.8      | 13.1      |                                             |
+| **ROCm 7.2** (Docker)    | **OFF** ✅ | 13.1     | 11.9      | 9.8       | *(Historical: 64GB GTT run — ~16% slower)*  |
+| **ROCm 6.2.4** (Docker)  | **OFF** ✅ | 10.6     | 9.7       | 8.3       | *(Historical: 64GB GTT run)*                |
 
 ### Best Settings per Use Case
 
 | Use Case              | Backend  | Flags                           | Prefill      | Decode      |
 | --------------------- | -------- | ------------------------------- | ------------ | ----------- |
-| Fastest prefill — any | CPU      | `-ngl 0 -fa 1`                  | 923 t/s      | 10–12 t/s   |
-| Fastest prefill — GPU | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 116–159 t/s  | ~14 t/s     |
-| Fastest generation    | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 116–159 t/s  | **15 t/s**  |
-| Best interactive chat | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 116–159 t/s  | **15 t/s**  |
-| ROCm best balance     | ROCm 7.2 | `-ngl 99 -fa 0`                 | 68–81 t/s    | 10–13 t/s   |
+| Fastest prefill — any | CPU      | `-ngl 0 -fa 1`                  | 839 t/s      | ~12–14 t/s  |
+| Fastest prefill — GPU | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 126–170 t/s  | ~17 t/s     |
+| Fastest generation    | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 126–170 t/s  | **17.4 t/s**|
+| Best interactive chat | Vulkan   | `-ngl 99 -dev Vulkan0 -fa 1`    | 126–170 t/s  | **17.4 t/s**|
+| ROCm best balance     | ROCm 7.2 | `-ngl 99 -fa 0`                 | ~76–89 t/s   | 11–15.6 t/s |
 
-**Key takeaways (Gemma 4 E4B vs Qwen3.5-35B-A3B):**
-- **Gemma prefill is dramatically faster on CPU** — 923 vs 233 t/s at 4K tokens; MoE sparse compute benefits AVX2 greatly
-- **Vulkan FA ON helps on Vega 8** — unlike ROCm, Mesa RADV SDPA kernels are well-tuned; prefill improves +43% at 128 tokens, +21% at 4K; decode also improves slightly (~14.7 vs 14.4 t/s); always use `-fa 1` with Vulkan
-- **ROCm FA ON pattern identical to Qwen** — gfx900 FA kernel gap; `-fa 0` mandatory for ROCm on Vega 8
-- **CPU decode on Gemma nearly matches Vulkan GPU** (12 vs 15 t/s) — UMA equalises bandwidth available to CPU and GPU
-- **Gemma GPU decode is lower than Qwen** on Vulkan (15 vs 20 t/s) — decode is memory-bandwidth bound; smaller effective model but different memory access pattern
+**Key takeaways (16GB VRAM Allocation vs 64GB GTT):**
+- **Restricting `amdgpu.gttsize` improves GPU performance globally:** Removing the `amdgpu.gttsize=65536` GRUB parameter and falling back to the 16 GB BIOS carveout unexpectedly boosted GPU decode speeds across the board. ROCm 7.2 baremetal decode jumped from ~13.3 t/s to ~15.6 t/s (+17%), and Vulkan decode surged from ~14.7 t/s to ~17.4 t/s (+18%). Vulkan prefill also increased slightly.
+- **CPU prefill took a slight hit, but CPU decode improved:** CPU prefill dropped slightly (923 → 839 t/s at 4K context) with the smaller memory map, but decode speeds increased to nearly match the GPU (12.3 → 14.7 t/s).
+- **Hypothesis for improvement:** While the maximum DDR4 memory bandwidth is identical for UMA whether using a 64GB or 16GB allocation window, avoiding the massive 64GB translation table lookup (GTT) likely reduces page faults and memory overhead on the APU's memory controller for small models that fit entirely inside the 16 GB carveout. 
+- **Recommendation:** If you only run models smaller than 14 GB (like Gemma 4, Llama 3 8B, etc), **do not** use `amdgpu.gttsize=65536`. Leave it removed to gain ~18% inference speed. Only use the 64GB GTT override when loading large models like Qwen 35B.

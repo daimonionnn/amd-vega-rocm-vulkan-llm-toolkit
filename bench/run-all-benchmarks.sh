@@ -179,7 +179,7 @@ start_rocm7_baremetal() {
     HSA_OVERRIDE_GFX_VERSION=9.0.0 \
     HSA_ENABLE_SDMA=1 \
     HSA_XNACK=1 \
-    GGML_HIP_UMA=1 \
+    GGML_HIP_UMA=0 \
     GPU_MAX_ALLOC_PERCENT=100 \
     LD_LIBRARY_PATH="$(dirname "$(dirname "$bin")")/lib:/opt/rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$bin" \
