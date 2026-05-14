@@ -75,13 +75,12 @@ ENABLED_BACKENDS=(
     # "ROCm-6.2.4-Baremetal-FA-ON:-fa 1:start_rocm6_baremetal"
 
     # ── Vulkan (native, GPU offload) ──────────────────────────────────────────
-    #"Vulkan-GPU-FA-OFF:-fa 0:start_vulkan_gpu"
-    # Vulkan flash attention is less impactful — uncomment to test:
-    #"Vulkan-GPU-FA-ON:-fa 1:start_vulkan_gpu"
+    "Vulkan-GPU-FA-OFF:-fa 0:start_vulkan_gpu"    
+    "Vulkan-GPU-FA-ON:-fa 1:start_vulkan_gpu"
 
     # ── CPU only (no GPU offload) ─────────────────────────────────────────────
-    #"CPU-FA-ON:-fa 1:start_cpu"
-    #"CPU-FA-OFF:-fa 0:start_cpu"
+    "CPU-FA-ON:-fa 1:start_cpu"
+    "CPU-FA-OFF:-fa 0:start_cpu"
 )
 
 # =============================================================================
