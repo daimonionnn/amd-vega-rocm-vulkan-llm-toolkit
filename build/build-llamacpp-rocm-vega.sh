@@ -104,11 +104,24 @@ else
     EXTRA_CMAKE_ARGS=""
 fi
 
-# CMake needs to find clang++-21 as the HIP compiler
-# On Ubuntu with llvm-21, it's not auto-detected
-export HIPCXX="/usr/bin/clang++-21"
-export HIP_CLANG_PATH="/usr/lib/llvm-21/bin"
-echo "  Using HIP compiler: $HIPCXX"
+# Detect HIP compiler via hipconfig (portable across ROCm versions).
+# Falls back to scanning common Ubuntu LLVM paths if hipconfig is unavailable.
+if command -v hipconfig &>/dev/null; then
+    HIPCXX="$(hipconfig -l)/clang"
+    HIP_CLANG_PATH="$(hipconfig -l)"
+    echo "  HIP compiler (hipconfig): $HIPCXX"
+elif [ -x "/usr/lib/llvm-21/bin/clang" ]; then
+    HIPCXX="/usr/lib/llvm-21/bin/clang"
+    HIP_CLANG_PATH="/usr/lib/llvm-21/bin"
+    echo "  HIP compiler (fallback llvm-21): $HIPCXX"
+else
+    # Last-resort: find the highest-versioned clang in /usr/lib/llvm-*/bin
+    HIPCXX=$(find /usr/lib/llvm-*/bin -name 'clang' -not -name 'clang++*' 2>/dev/null | sort -V | tail -1)
+    HIP_CLANG_PATH=$(dirname "$HIPCXX" 2>/dev/null || true)
+    echo "  HIP compiler (scan): ${HIPCXX:-NOT FOUND}"
+    [ -z "$HIPCXX" ] && echo "✗  No HIP-compatible clang found. Install hipcc or clang." && exit 1
+fi
+export HIPCXX HIP_CLANG_PATH
 
 # Patch: relax HIP version check (Ubuntu packages HIP 5.7, llama.cpp wants 6.1+)
 # The core HIP/hipBLAS API is compatible enough for our use case
@@ -162,6 +175,7 @@ cmake -B build \
     -DCMAKE_HIP_FLAGS="-mcode-object-version=5" \
     -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+    -DGGML_HIP_GRAPHS=OFF \
     -DGGML_HIP_UMA=ON \
     -DLLAMA_BUILD_SERVER=ON \
     -DLLAMA_BUILD_EXAMPLES=ON \

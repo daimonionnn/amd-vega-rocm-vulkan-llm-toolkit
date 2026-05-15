@@ -31,6 +31,7 @@ RUN apt-get update -qq && \
       hipblas-dev \
       rocblas-dev \
       rocsolver-dev \
+      numactl \
       software-properties-common \
       gnupg2 \
       dpkg-dev && \
@@ -89,8 +90,11 @@ RUN cmake -B build \
       -DGGML_HIP=ON \
       -DAMDGPU_TARGETS="gfx900" \
       -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_HIP_GRAPHS=OFF \
       -DGGML_HIP_UMA=ON \
       -DGGML_FLASH_ATTN=ON \
+      -DGGML_BACKEND_DL=ON \
+      -DGGML_CPU_ALL_VARIANTS=ON \
       -DLLAMA_BUILD_SERVER=ON \
       -DLLAMA_BUILD_EXAMPLES=ON && \
     cmake --build build --config Release -j$(nproc)

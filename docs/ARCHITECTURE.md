@@ -351,6 +351,73 @@ rocm-smi              → GPU monitoring tool
 
 These are the Ubuntu-repackaged versions, not AMD's official ROCm releases. The HIP version (5.7) lags behind AMD's current ROCm (6.x), which is why patches are needed.
 
+## Related Projects and References
+
+### mixa3607/ML-gfx906 — ML builds for AMD GFX906 (Radeon VII / MI50 / MI60)
+
+**[https://github.com/mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906)**
+
+A well-maintained project providing Docker images and build scripts for llama.cpp, ComfyUI, vLLM, and PyTorch on **gfx906** GPUs (Radeon VII / MI50 / MI60). gfx906 is the same GCN 5 / Vega generation as gfx90c (Vega 8 APU) and gfx900 (Vega 10), so its build findings transfer directly to this project.
+
+Prebuild Docker images are published to Docker Hub:
+- `docker.io/mixa3607/llama.cpp-gfx906:<ver>-rocm-6.3.3`
+- `docker.io/mixa3607/llama.cpp-gfx906:<ver>-rocm-7.2.1`
+- ROCm patched base images: `docker.io/mixa3607/rocm-gfx906:<ver>-complete` (ROCm 6.3.3 – 7.2.1)
+
+**What has been adopted from this project:**
+
+| Improvement | Applied to | Details |
+|---|---|---|
+| `GGML_HIP_GRAPHS=OFF` | All build scripts + Dockerfiles | HIP graph execution is broken/unstable on GCN5 Vega. Explicitly disabled following their "llamacpp: disable HIP_GRAPHS" commit. Confirmed build success 2026-05-14 (baremetal ROCm 7 rebuild). |
+| `GGML_BACKEND_DL=ON` | ROCm 7 builds (baremetal + Docker) + ROCm 6 Docker | Dynamic backend loading: HIP and CPU backends are shared libs loaded at runtime. More robust than static linking; enables graceful CPU fallback on OOM. Confirmed: 14 CPU variant `.so` files installed in baremetal rebuild 2026-05-14. |
+| `GGML_CPU_ALL_VARIANTS=ON` | ROCm 7 builds (baremetal + Docker) + ROCm 6 Docker | Compiles multiple CPU SIMD variants into a single install; best variant selected at runtime. Confirmed: 14 variants built (x64, sse42, sandybridge, ivybridge, piledriver, haswell, skylakex, cannonlake, cascadelake, icelake, cooperlake, zen4, alderlake, sapphirerapids). Ryzen 5700G (Zen 3 / AVX2) selects `haswell` at runtime. |
+
+**What was reviewed but not adopted:**
+
+| Item | Reason |
+|---|---|
+| `GGML_HIP_RCCL=ON` | Multi-GPU collective comms — Vega 8 is single-GPU only |
+| ROCm patched base images (`rocm-gfx906`) | Their patches re-enable gfx906 in ROCm 6.4+ which officially dropped it. gfx90c/gfx900 remains **natively supported** in the ROCm 6.3.x / 7.x versions used here — no re-patching needed |
+| ComfyUI / vLLM / PyTorch | gfx906 has 16 GB HBM2. Vega 8 iGPU shares system RAM with limited bandwidth — insufficient for ComfyUI diffusion or vLLM's memory requirements |
+| AVX-512 CPU build flags | Host CPU (Ryzen 7 5700G, Zen 3) does not have AVX-512 — would fail to build |
+| `numactl` in Docker | Useful on NUMA servers; minor relevance for desktop APU (see TODO below) |
+
+**Remaining TODOs (from this project's analysis):**
+
+- [x] `GGML_BACKEND_DL=ON` + `GGML_CPU_ALL_VARIANTS=ON` for ROCm 6.2.4 Docker (`Dockerfile.rocm64`) — applied
+- [x] Replace hardcoded `HIPCXX=/usr/bin/clang++-21` in `build-llamacpp-rocm-vega.sh` with `hipconfig`-based auto-detection — applied; falls back to LLVM scan if `hipconfig` unavailable
+- [x] Add `numactl` to Docker images — applied to both `Dockerfile.rocm64` and `Dockerfile.rocm7-vega`
+- [ ] Document `numactl --membind=0 llama-server` as a low-latency option for NUMA-sensitive workloads — low priority on desktop APU
+- [x] AVX-512 build flags — **N/A**: Ryzen 7 5700G (Zen 3) has no AVX-512; `GGML_CPU_ALL_VARIANTS=ON` auto-selects the best available SIMD (AVX2 on this CPU) at runtime without needing explicit flags
+
+### Future: Vega 56 / Vega 64 support (gfx900 / gfx906 discrete)
+
+> **Note:** This project is developed and tested on a **Vega 8 APU** (gfx90c, shared RAM). Discrete Vega cards are the same ISA generation and would benefit from the same ROCm build approach — but with significantly better hardware characteristics.
+
+| Card | GFX ID | VRAM | HBM2 bandwidth | CUs |
+|------|--------|------|----------------|-----|
+| Radeon RX Vega 56 | gfx900 | 8 GB HBM2 | ~410 GB/s | 56 |
+| Radeon RX Vega 64 | gfx900 | 8 GB HBM2 | ~484 GB/s | 64 |
+| Radeon VII | **gfx906** | **16 GB HBM2** | ~1 TB/s | 60 |
+| MI50 / MI60 | gfx906 | 16–32 GB HBM2 | ~1 TB/s | 60 |
+| **Vega 8 APU (this system)** | gfx90c | UMA (shared DDR4) | ~50 GB/s | 8 |
+
+Discrete Vega 56/64 use the **same gfx900 target** as this project already builds for, so the existing Dockerfiles and build scripts would work with no changes. The HBM2 bandwidth (8-20×) and dedicated VRAM make practical use cases that are out of reach on the APU:
+
+- **PyTorch** — 8 GB HBM2 is enough for fine-tuning small models (7B at INT4), inference, and many computer vision tasks. [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906) already provides working PyTorch images for gfx906.
+- **ComfyUI** — Stable Diffusion inference (SD1.5, SDXL with `--lowvram`) is feasible on 8 GB HBM2. FLUX.1-dev needs 16 GB (Radeon VII / MI50). [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906) has ComfyUI Docker images too.
+- **vLLM** — Requires PyTorch; feasible for 7B models on 8 GB, larger quantized models on 16 GB.
+
+**For contributors with Vega 56/64 hardware:**
+
+The gfx906 project is the primary reference. Key differences vs this project:
+- No `HSA_OVERRIDE_GFX_VERSION` needed on true gfx900/gfx906 hardware (set natively by ROCm)
+- No UMA quirks — discrete VRAM, `GGML_HIP_UMA=0`, no GTT tuning needed
+- ROCm 6.4+ dropped gfx906 support; either use ROCm ≤ 6.3.x, or use the [gfx906 patched base images](https://github.com/mixa3607/ML-gfx906/tree/master/rocm) for ROCm 6.4+/7.x
+- PyTorch/ComfyUI Dockerfiles would need to be adapted from [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906) to use this repo's build conventions
+
+**Pull requests and forks are welcome** — hardware not available for testing in this repo. See [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906) for reference implementations.
+
 ## Further Reading
 
 - [llama.cpp HIP/ROCm documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md#hip)

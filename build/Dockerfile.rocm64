@@ -3,7 +3,7 @@ FROM rocm/dev-ubuntu-24.04:6.2.4
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       build-essential cmake git curl python3 libomp-dev \
-      hipblas-dev rocblas-dev rocsolver-dev && \
+      hipblas-dev rocblas-dev rocsolver-dev numactl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,8 +22,10 @@ RUN cmake -B build \
       -DGGML_HIP=ON \
       -DAMDGPU_TARGETS="gfx900" \
       -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_HIP_GRAPHS=OFF \
       -DGGML_FLASH_ATTN=ON \
-      -DGGML_HIP_GRAPHS=ON && \
+      -DGGML_BACKEND_DL=ON \
+      -DGGML_CPU_ALL_VARIANTS=ON && \
     cmake --build build --config Release -j$(nproc)
 
 # ROCm environment for Vega 8 APU

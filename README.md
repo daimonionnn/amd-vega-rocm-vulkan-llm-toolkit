@@ -257,3 +257,7 @@ VEGA-ROCm-VULKAN-LLM-Toolkit/
 - [x] **Test ROCm 7.2 Docker build on Vega 8** (`build/Dockerfile.rocm7-vega` + `run/run-docker-rocm7.sh`) — confirmed working 2026-05-14, 35B full offload
 - [x] **Baremetal ROCm 7.2 build working** — confirmed 2026-05-14; binary sees Vega 8 as `gfx900:xnack-` with 65536 MiB; `ROCR_VISIBLE_DEVICES=1` (Vega 8 is GPU index 1 with RX 9700 as index 0)
 - [x] **Compare ROCm 6.x vs ROCm 7.x inference speed on Vega 8** — both benefit from `-fa 0`; ROCm 7 FA OFF (70 t/s) edges out ROCm 6 FA OFF (64 t/s) at 1K/4K context; CPU FA ON wins overall (233 t/s at 4K)
+- [x] **Adopt improvements from mixa3607/ML-gfx906** (same GCN5/Vega arch, gfx906): disable `GGML_HIP_GRAPHS` everywhere (stability fix), add `GGML_BACKEND_DL=ON` + `GGML_CPU_ALL_VARIANTS=ON` to ROCm 7 builds, apply to ROCm 6 Docker too, add `numactl` to Docker images, `hipconfig`-based HIP compiler auto-detection in build scripts
+- [x] Benchmark ROCm 7 builds after `GGML_HIP_GRAPHS=OFF` + `GGML_BACKEND_DL=ON` — rebuild succeeded 2026-05-14; **re-benchmarking needed** to compare before/after performance
+- [ ] Document `numactl --membind=0 llama-server` usage for NUMA-sensitive workloads
+- [ ] **Future / community:** Vega 56/64 (gfx900) and Radeon VII/MI50/MI60 (gfx906) discrete GPU support — PyTorch, ComfyUI, vLLM. See [docs/ARCHITECTURE.md — Future: Vega 56/64](docs/ARCHITECTURE.md) and [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906). Forks and PRs welcome.

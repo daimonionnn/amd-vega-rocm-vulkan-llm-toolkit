@@ -10,7 +10,7 @@ LM Studio's bundled ROCm backend only includes kernels for RDNA2+ GPUs (gfx1030 
 > - **Host HIP 5.7.1 is broken** — Ubuntu 25.10 ships HIP 5.7.1/Clang-21, a ~2 major version mismatch; GPU inference segfaults. Do not use `run/run-llamaserver-rocm.sh` for GPU offload.
 > - **ROCm 6.2.4 Docker** (`./run/run-docker-rocm.sh`) — stable, full GPU offload confirmed.
 > - **ROCm 7.2 Docker** (`./run/run-docker-rocm7.sh`) — confirmed working 2026-05-14, 35B full offload stable, gfx900 tensile backport applied.
-> - **ROCm 7.2 Baremetal** — **default path**, confirmed working 2026-05-14. Install via `setup/install-rocm7-host.sh`, build via `build/build-llamacpp-rocm7-baremetal.sh`, run via `run/start-llama-server.sh` or `run/run-rocm7-baremetal.sh`. Two Ubuntu 25.10 workarounds needed (see [Baremetal Prerequisites](#baremetal-prerequisites-ubuntu-2510) below).
+> - **ROCm 7.2 Baremetal** — **default path**, confirmed working 2026-05-14. Rebuilt 2026-05-14 with `GGML_HIP_GRAPHS=OFF`, `GGML_BACKEND_DL=ON`, `GGML_CPU_ALL_VARIANTS=ON` (14 CPU SIMD variants, runtime-selected). Install via `setup/install-rocm7-host.sh`, build via `build/build-llamacpp-rocm7-baremetal.sh`, run via `run/start-llama-server.sh` or `run/run-rocm7-baremetal.sh`. Two Ubuntu 25.10 workarounds needed (see [Baremetal Prerequisites](#baremetal-prerequisites-ubuntu-2510) below).
 >
 > For native GPU inference without ROCm, **use Vulkan** — see [ARCHITECTURE.md](ARCHITECTURE.md#vulkan-vs-rocm-on-this-system).
 >
