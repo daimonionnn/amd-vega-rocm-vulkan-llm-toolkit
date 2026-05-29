@@ -1,4 +1,4 @@
-# VEGA-ROCm-VULKAN-LLM-Toolkit for Linux 
+# amd-vega-rocm-vulkan-llm-toolkit for Linux 
 
 Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen 5700G APU) + tools for multi-GPU LLM management (Vega + AMD/NVIDIA dGPUs) — llama.cpp (`llama-server`) and LM Studio.
 
@@ -195,7 +195,7 @@ bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192
 ## Project Structure
 
 ```
-VEGA-ROCm-VULKAN-LLM-Toolkit/
+amd-vega-rocm-vulkan-llm-toolkit/
 ├── README.md
 ├── run/
 │   ├── start-llama-server.sh          ← Main launcher (ROCm 7.2 baremetal default)
