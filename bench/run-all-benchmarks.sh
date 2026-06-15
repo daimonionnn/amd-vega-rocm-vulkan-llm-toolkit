@@ -58,17 +58,18 @@ ROCM6_LLAMA_BIN=""   # override: /opt/rocm6/bin/llama-server
 # Format: "LABEL:FA_FLAG:START_FUNC"
 # =============================================================================
 ENABLED_BACKENDS=(
-    # ── ROCm 7.2 via Docker ───────────────────────────────────────────────────
-    #"ROCm-7.2-Docker-FA-OFF:-fa 0:start_rocm7_docker"
-    #"ROCm-7.2-Docker-FA-ON:-fa 1:start_rocm7_docker"
+    # ── ROCm 7.2 via Docker (recommended ROCm path — self-contained image) ───
+    "ROCm-7.2-Docker-FA-OFF:-fa 0:start_rocm7_docker"
+    "ROCm-7.2-Docker-FA-ON:-fa 1:start_rocm7_docker"
 
     # ── ROCm 6.2.4 via Docker ────────────────────────────────────────────────
     #"ROCm-6.2.4-Docker-FA-OFF:-fa 0:start_rocm6_docker"
     #"ROCm-6.2.4-Docker-FA-ON:-fa 1:start_rocm6_docker"
 
-    # ── ROCm 7.2 bare-metal ─────────────────────────────────────────────────
-    "ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"
-    "ROCm-7.2-Baremetal-FA-ON:-fa 1:start_rocm7_baremetal"
+    # ── ROCm 7.2 bare-metal (needs ROCm 7.2 + gfx900 backport on the host;
+    #    broken since the host moved to modular ROCm 7.13+/gfx120x packages) ──
+    #"ROCm-7.2-Baremetal-FA-OFF:-fa 0:start_rocm7_baremetal"
+    #"ROCm-7.2-Baremetal-FA-ON:-fa 1:start_rocm7_baremetal"
 
     # ── ROCm 6.2.4 bare-metal (uncomment when host ROCm stack is working) ────
     # "ROCm-6.2.4-Baremetal-FA-OFF:-fa 0:start_rocm6_baremetal"
@@ -174,12 +175,13 @@ start_rocm7_baremetal() {
     echo "  [start] ROCm 7.2 — bare-metal ($bin) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     sleep 1
-    ROCR_VISIBLE_DEVICES=1 \
+    # HSA_XNACK must stay 0 — XNACK=1 hard-freezes the whole PC on Vega 8.
+    # HSA_ENABLE_SDMA=0 — SDMA is unreliable on integrated Vega.
+    ROCR_VISIBLE_DEVICES="$(_detect_vega8_rocm_index)" \
     HIP_VISIBLE_DEVICES=0 \
     HSA_OVERRIDE_GFX_VERSION=9.0.0 \
-    HSA_ENABLE_SDMA=1 \
-    HSA_XNACK=1 \
-    GGML_HIP_UMA=1 \
+    HSA_ENABLE_SDMA=0 \
+    HSA_XNACK=0 \
     GPU_MAX_ALLOC_PERCENT=100 \
     LD_LIBRARY_PATH="$(dirname "$(dirname "$bin")")/lib:/opt/rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$bin" \
@@ -205,7 +207,7 @@ start_rocm6_baremetal() {
     echo "  [start] ROCm 6.2.4 — bare-metal ($ROCM6_LLAMA_BIN) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     sleep 1
-    ROCR_VISIBLE_DEVICES=1 HIP_VISIBLE_DEVICES=0 \
+    ROCR_VISIBLE_DEVICES="$(_detect_vega8_rocm_index)" HIP_VISIBLE_DEVICES=0 \
         "$ROCM6_LLAMA_BIN" \
         -m "$CURRENT_MODEL" \
         $fa_flag \
@@ -273,8 +275,31 @@ _detect_vega8_render_node() {
             return 0
         fi
     done
-    # Fallback: return renderD129 (known Vega 8 node on this machine)
-    echo "/dev/dri/renderD129"
+    # Fallback: known Vega 8 node on this machine (June 2026, with 2× R9700)
+    echo "/dev/dri/renderD130"
+}
+
+# 0-based GPU index of the Vega 8 in rocminfo agent order (= ROCR index).
+# rocminfo prints each agent's "Name: gfxXXX" before its "Device Type: GPU".
+_detect_vega8_rocm_index() {
+    if [[ -n "${VEGA8_ROCM_DEVICE:-}" ]]; then
+        echo "$VEGA8_ROCM_DEVICE"
+        return
+    fi
+    local rocminfo_bin="/opt/rocm/bin/rocminfo"
+    [[ -x "$rocminfo_bin" ]] || rocminfo_bin="$(command -v rocminfo || true)"
+    if [[ -z "$rocminfo_bin" ]]; then
+        echo "0"
+        return
+    fi
+    "$rocminfo_bin" 2>/dev/null | awk '
+        $1 == "Name:" && $2 ~ /^gfx/  { name = $2 }
+        /Device Type:[[:space:]]+GPU/ {
+            if (name ~ /^gfx90[029c]$/) { print gpu; found = 1; exit }
+            gpu++
+        }
+        END { if (!found) print 0 }
+    '
 }
 
 wait_for_server() {

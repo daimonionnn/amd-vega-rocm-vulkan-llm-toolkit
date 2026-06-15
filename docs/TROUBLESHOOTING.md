@@ -16,9 +16,9 @@ This shows:
 
 ---
 
-## Multi-GPU: Targeting Vega 8 with Radeon 9700 AI Pro also present
+## Multi-GPU: Targeting Vega 8 with Radeon AI PRO R9700s also present
 
-With two AMD GPUs (`/dev/dri/renderD128` = Radeon 9700 AI Pro, `/dev/dri/renderD129` = Vega 8 iGPU), ROCm may pick the wrong GPU.
+With three AMD GPUs (`/dev/dri/renderD128`/`renderD129` = R9700s, `/dev/dri/renderD130` = Vega 8 iGPU — June 2026 layout), ROCm picks the wrong GPU without explicit selection. Render node numbers shift whenever dGPUs are added or removed, which is why all scripts detect by PCI ID instead of hardcoding a node.
 
 ### Docker scripts (automatic)
 
@@ -27,12 +27,12 @@ With two AMD GPUs (`/dev/dri/renderD128` = Radeon 9700 AI Pro, `/dev/dri/renderD
 ```bash
 # Auto-detect confirmed: looks for PCI ID 0x1638 (Vega 8)
 ./run/run-docker-rocm.sh /path/to/model.gguf
-# → "  Vega 8 render node: /dev/dri/renderD129"
+# → "  Vega 8 render node: /dev/dri/renderD130"
 ```
 
 If auto-detect fails (different APU revision / PCI ID):
 ```bash
-VEGA8_RENDER_NODE=/dev/dri/renderD129 ./run/run-docker-rocm.sh /path/to/model.gguf
+VEGA8_RENDER_NODE=/dev/dri/renderD130 ./run/run-docker-rocm.sh /path/to/model.gguf
 ```
 
 To identify your render nodes:
@@ -43,24 +43,24 @@ for node in /sys/class/drm/renderD*/device; do
     vendor=$(cat "$node/vendor" 2>/dev/null)
     echo "$render  vendor=$vendor  device=$dev"
 done
-# renderD128  vendor=0x1002  device=0x7551   ← Radeon 9700 AI Pro
-# renderD129  vendor=0x1002  device=0x1638   ← Vega 8 iGPU
+# renderD128  vendor=0x1002  device=0x7551   ← Radeon AI PRO R9700
+# renderD129  vendor=0x1002  device=0x7551   ← Radeon AI PRO R9700
+# renderD130  vendor=0x1002  device=0x1638   ← Vega 8 iGPU
 ```
 
 ### Baremetal (manual)
 
-Verify which HSA agent is the Vega 8:
+`run/run-rocm7-baremetal.sh` auto-detects the Vega 8 agent index (override with `VEGA8_ROCM_DEVICE=N`). To do it manually, verify which HSA agent is the Vega 8:
 ```bash
 rocminfo | grep -B2 -A8 'gfx90'
 ```
 
 Then set before running any ROCm binary:
 ```bash
-# With RX 9700 AI Pro also present: GPU 0 = gfx1201 (RX 9700), GPU 1 = gfx90c (Vega 8)
-export ROCR_VISIBLE_DEVICES=1   # index of Vega 8 — verify with rocminfo (may differ on your system)
+# June 2026: GPU 0+1 = gfx1201 (R9700s), GPU 2 = gfx90c (Vega 8)
+export ROCR_VISIBLE_DEVICES=2   # index of Vega 8 — verify with rocminfo (may differ on your system)
 export HIP_VISIBLE_DEVICES=0    # relative index within ROCR_VISIBLE_DEVICES mask
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
-export GGML_HIP_UMA=1           # required for iGPU UMA (shared system RAM)
 export HSA_ENABLE_SDMA=0
 export HSA_XNACK=0
 ```
@@ -73,6 +73,22 @@ bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99
 ---
 
 ## Common Errors
+
+### "no ROCm-capable device is detected" / rocminfo `HSA_STATUS_ERROR_OUT_OF_RESOURCES` with the gfx900 override
+
+```
+ggml_cuda_init: failed to initialize ROCm: no ROCm-capable device is detected
+# and, with HSA_OVERRIDE_GFX_VERSION=9.0.0 set:
+Call returned HSA_STATUS_ERROR_OUT_OF_RESOURCES
+```
+
+**Cause:** AMD's modular ROCm packages (`amdrocm-core` 7.13+, arch-specific builds like gfx120x) replaced the classic ROCm install. That ROCr runtime rejects `HSA_OVERRIDE_GFX_VERSION=9.0.0`, and its rocBLAS ships no gfx9 tensile kernels (the backported gfx900 files in `/opt/rocm/lib/rocblas/library/` are gone), so the baremetal gfx900 path can't work — even though the runtime *enumerates* the Vega natively as gfx90c.
+
+**Fix:** Use the self-contained Docker image, which bundles its own ROCm 7.2 userspace where the override works:
+```bash
+./run/run-docker-rocm7.sh /path/to/model.gguf -ngl 99 -c 8192 -fa 0
+```
+`run/run-rocm7-baremetal.sh` detects this situation and aborts with the same advice (bypass with `SKIP_ROCM_CHECKS=1`).
 
 ### "ROCm error: invalid device function"
 
@@ -216,7 +232,8 @@ A 9B Q4_K_M model needs ~5.5 GB for weights alone, plus KV cache (which grows wi
 
 If you want to try full offload explicitly:
 ```bash
-./run/start-llama-server.sh     # uses -ngl 99 with ROCm 7.2 baremetal by default
+./run/start-llama-server.sh                # -ngl 99 on Vulkan (default backend)
+./run/start-llama-server.sh --rocm-docker  # -ngl 99 on ROCm 7.2 Docker (needs 64 GB GTT)
 ```
 
 ### Inference segfault / hard crash with ROCm despite kernel tests passing
@@ -278,7 +295,7 @@ The host Ubuntu ROCm stack (HIP 5.7.1 + Clang-21) has an unresolvable version mi
 |---------|-----|
 | `__hip_fp8_e4m3` undefined (gfx900 has no FP8) | Shell loop replaces each `typedef __hip_fp8_* __nv_fp8_*;` with a stub struct in `vendors/hip.h` |
 | `HSA_XNACK=1` freezes entire PC | `HSA_XNACK=0` — disables xnack to prevent system hang |
-| `GGML_HIP_UMA=1` + `XNACK=0` = segfault | `GGML_HIP_UMA=0` — UMA mode requires page-fault handling which XNACK=0 disables |
+| `GGML_HIP_UMA=1` + `XNACK=0` = segfault | Historical — `GGML_HIP_UMA` has since been removed from llama.cpp; plain hipMalloc into GTT is the default and works. The lesson stands: anything relying on page faults needs XNACK, and XNACK=1 freezes the Vega 8 |
 | Server only reachable inside container | `--host 0.0.0.0` passed to `llama-server` so Docker port mapping works |
 | Old ROCm 6.4.4 image: `.so.6` vs `.so.5` ABI mismatch | Use `rocm/dev-ubuntu-24.04:6.2.4` (stable, gfx900-compatible) |
 
@@ -407,8 +424,11 @@ hipcc --version
 
 ```bash
 ls -la /dev/dri/render*
-# renderD128 = usually dGPU (NVIDIA)
-# renderD129 = usually iGPU (AMD Vega 8)
+# Node numbers depend on PCIe enumeration and change when dGPUs are
+# added/removed — identify by PCI device ID instead (Vega 8 = 0x1638):
+for n in /sys/class/drm/renderD*/device; do
+    echo "$(basename "$(dirname "$n")")  $(cat "$n/device")"
+done
 ```
 
 ### Check LM Studio ROCm backend targets
@@ -457,7 +477,7 @@ done
 ```bash
 # Test individual ops with a timeout to prevent hangs
 # XNACK=0: XNACK=1 hard-freezes the Vega 8 PC
-export HSA_OVERRIDE_GFX_VERSION=9.0.0 HSA_ENABLE_SDMA=0 HSA_XNACK=0 GGML_HIP_UMA=0
+export HSA_OVERRIDE_GFX_VERSION=9.0.0 HSA_ENABLE_SDMA=0 HSA_XNACK=0
 
 # SCALE test (should pass quickly)
 timeout 10 ./llm/rocm-vega/bin/test-backend-ops -o SCALE -b ROCm0
@@ -475,7 +495,7 @@ timeout 60 ./llm/rocm-vega/bin/test-backend-ops -o MUL_MAT -b ROCm0
 | `HSA_OVERRIDE_GFX_VERSION` | `9.0.0` | Make ROCm see gfx90c as gfx900 |
 | `HSA_ENABLE_SDMA` | `0` | Disable SDMA (crashes on APU iGPUs) |
 | `HSA_XNACK` | `0` | Disable xnack — prevents PC hard-freeze on Vega 8 iGPU (`1` freezes the entire system) |
-| `GGML_HIP_UMA` | `0` | Disable UMA mode — required when `HSA_XNACK=0` (UMA needs page-fault handling which xnack provides) |
+| `GGML_HIP_UMA` | — | Removed from llama.cpp (no longer a build option or env var); listed here because older docs reference it |
 | `GPU_MAX_ALLOC_PERCENT` | `100` | Allow full GPU memory allocation |
 | `GPU_SINGLE_ALLOC_PERCENT` | `100` | Allow single large allocations |
 | `GPU_MAX_HEAP_SIZE` | `100` | Allow full heap usage |

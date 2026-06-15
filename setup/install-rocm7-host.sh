@@ -62,6 +62,26 @@ echo "  Ubuntu codename forced to: ${UBUNTU_CODENAME} (24.04 packages — ABI co
 echo "  ROCm repo: ${ROCM_REPO_BASE}"
 echo ""
 
+check_modular_rocm_conflict() {
+    # AMD's modular ROCm packages (amdrocm-core*, e.g. for RDNA4 cards) manage
+    # /opt/rocm via update-alternatives. Installing classic ROCm 7.2 packages
+    # alongside them will fight over /opt/rocm and can break the existing
+    # (e.g. R9700) setup. Refuse to continue if they are present.
+    if dpkg -l 2>/dev/null | grep -q "^ii  amdrocm-core"; then
+        echo "✗  AMD modular ROCm packages (amdrocm-core*) are installed:"
+        dpkg -l | grep "^ii  amdrocm-core" | awk '{print "     " $2 "  " $3}'
+        echo ""
+        echo "   Installing classic ROCm ${ROCM_VERSION} packages on top of these would"
+        echo "   conflict over /opt/rocm (alternatives-managed) and could break the"
+        echo "   GPU setup they were installed for."
+        echo ""
+        echo "   For ROCm inference on the Vega 8, use the self-contained Docker image:"
+        echo "     docker build -t llama-rocm7-vega -f build/Dockerfile.rocm7-vega build/"
+        echo "     ./run/run-docker-rocm7.sh /path/to/model.gguf"
+        exit 1
+    fi
+}
+
 check_kfd() {
     echo "─── Checking /dev/kfd ────────────────────────────────────────"
     if [ -c /dev/kfd ]; then
@@ -203,19 +223,20 @@ print_next_steps() {
     echo "     ROCm 7 LLVM was built against libxml2.so.2; create a compat symlink:"
     echo "       sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2"
     echo ""
-    echo "  3. Vega 8 GPU index — verify before running:"
-    echo "       rocminfo | grep -E 'Agent|Name.*gfx' | grep -A1 'Agent'"
-    echo "     On this system: GPU 0 = gfx1201 (RX 9700), GPU 1 = gfx90c (Vega 8)"
-    echo "     Use ROCR_VISIBLE_DEVICES=1 to select Vega 8 in baremetal mode."
+    echo "  3. Vega 8 GPU index — verify with:"
+    echo "       rocminfo | grep -E 'Agent|Name.*gfx'"
+    echo "     The index depends on which other GPUs are installed; the run"
+    echo "     script auto-detects it (override with VEGA8_ROCM_DEVICE=N)."
     echo ""
     echo "  4. Build llama.cpp for Vega 8 (applies gfx900 tensile backport):"
     echo "       bash build/build-llamacpp-rocm7-baremetal.sh"
     echo ""
-    echo "  5. Run (Vega 8 is GPU index 1 on this system):"
+    echo "  5. Run (auto-detects the Vega 8 device index):"
     echo "       bash run/run-rocm7-baremetal.sh /path/to/model.gguf"
     echo ""
 }
 
+check_modular_rocm_conflict
 check_kfd
 install_rocm_key
 add_rocm_repo

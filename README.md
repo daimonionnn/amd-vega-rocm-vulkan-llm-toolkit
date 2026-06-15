@@ -8,16 +8,16 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 | --------- | ------------------------------------------------------------------------ |
 | CPU/APU   | AMD Ryzen 7 5700G (8C/16T, Zen 3)                                        |
 | iGPU      | Radeon Vega 8 — gfx90c (GCN 5, 8 CUs, 512 MB dedicated + UMA shared RAM) |
-| dGPU 1    | AMD Radeon RX 9700 AI Pro (RDNA4, dedicated VRAM)                        |
-| dGPU 2    | NVIDIA GeForce RTX 5090 (32 GB VRAM)                                     |
+| dGPU 1+2  | 2× AMD Radeon AI PRO R9700 (RDNA4 / gfx1201, 32 GB VRAM each)            |
 | RAM       | 64 GB DDR4 (shared with Vega 8 iGPU via UMA)                             |
 | OS        | Ubuntu 25.10 "Questing", kernel 6.17                                     |
+| Host ROCm | AMD modular packages (`amdrocm-core` 7.13/7.14, gfx120x — for the R9700s) |
 
-> **GPU targeting note:** Scripts in this toolkit explicitly target the **Vega 8 iGPU** (`/dev/dri/renderD129`, auto-detected by PCI ID `0x1638`). With RX 9700 AI Pro also present, ROCm device indices are: GPU 0 = gfx1201 (RX 9700), GPU 1 = gfx90c (Vega 8) — so baremetal scripts use `ROCR_VISIBLE_DEVICES=1`. Docker scripts pass only `renderD129` into the container so `ROCR_VISIBLE_DEVICES=0` applies there. Vulkan scripts use `-dev Vulkan0` (RADV RENOIR). The Radeon 9700 AI Pro and RTX 5090 are not used by these scripts unless you explicitly change device selection.
+> **GPU targeting note:** Scripts in this toolkit explicitly target the **Vega 8 iGPU**, auto-detected by PCI ID `0x1638` (`/dev/dri/renderD130` as of June 2026 — the node number moves when dGPUs change). ROCm agent order: GPU 0+1 = gfx1201 (R9700s), GPU 2 = gfx90c (Vega 8) — baremetal scripts auto-detect this index (override with `VEGA8_ROCM_DEVICE=N`). Docker scripts pass only the Vega render node into the container so `ROCR_VISIBLE_DEVICES=0` applies there. Vulkan scripts auto-detect the `RADV RENOIR` device (currently `Vulkan0`). The R9700s are not used by these scripts unless you explicitly change device selection.
 
 ## Performance
 
-### Vega 8 iGPU — Qwen3.5-35B-A3B Q4_K_M (`-ngl 99 -c 8192`)
+### Vega 8 iGPU — Qwen3.5-35B-A3B Q4_K_M (`-ngl 99 -c 8192`, May 2026)
 
 | Backend                        | Prefill (t/s) | Generation (t/s) | Notes                                                                      |
 | ------------------------------ | ------------- | ---------------- | -------------------------------------------------------------------------- |
@@ -26,7 +26,7 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 | Vulkan native (FA OFF default) | 45–50         | 19–20            | **Best generation throughput** — stable across all context sizes           |
 | ROCm 6.2.4 — **FA OFF**        | 40–64         | 12–14            | `-fa 0` recommended — FA ON hurts prefill ~33–83% on Vega 8                |
 | ROCm 6.2.4 — FA ON             | 35–49         | 11–13            | Default in old config; suboptimal, use `-fa 0`                             |
-| ROCm 7.2 — **FA OFF**          | 39–70         | 12–15            | **Best GPU prefill at large context.** `-fa 0` recommended on Vega 8       |
+| ROCm 7.2 — **FA OFF**          | 39–84*        | 12–15            | **Best GPU prefill at large context.** `-fa 0` recommended; *84 t/s @4K with `-ub 2048` (June 2026 tuning) |
 | ROCm 7.2 — FA ON               | 36–53         | 12–15            | Available for comparison; weaker prefill than FA OFF at ≥ 1K tokens        |
 | LM Studio (Vulkan)             | 49–158*       | 18–19            | *Prefill inflated by LM Studio batching — not directly comparable          |
 
@@ -35,17 +35,20 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 ## Quick Start
 
 ```bash
-# ROCm 7.2 baremetal on Vega 8 (default, best GPU prefill)
+# Vulkan / Mesa RADV on Vega 8 (default, best decode)
 ./run/start-llama-server.sh
-
-# Vulkan / Mesa RADV on Vega 8 (best decode)
-./run/start-llama-server.sh --vulkan
 
 # CPU only (best prefill at large context)
 ./run/start-llama-server.sh --cpu
 
-# ROCm 7.2 via Docker
+# ROCm 7.2 via Docker (recommended ROCm path — best GPU prefill)
+./run/start-llama-server.sh --rocm-docker
+# or directly:
 ./run/run-docker-rocm7.sh /path/to/model.gguf -ngl 99 -c 8192 --no-warmup
+
+# ROCm 7.2 baremetal — only if the host still has ROCm 7.2 + gfx900 backport
+# (broken since the host moved to modular ROCm 7.13+/gfx120x — see below)
+./run/start-llama-server.sh --rocm
 
 # API endpoint: http://127.0.0.1:8080/v1
 curl http://127.0.0.1:8080/v1/chat/completions \
@@ -57,8 +60,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 | Script                                                                   | Purpose                                                                                                           |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| [`run/start-llama-server.sh`](run/start-llama-server.sh)                                     | **Main launcher.** ROCm 7.2 baremetal by default. `--vulkan`/`--cpu`/`--rocm-docker` modes.                        |
-| [`run/run-llamaserver-vulkan.sh`](run/run-llamaserver-vulkan.sh)         | Direct Vulkan llama-server wrapper with full device selection (`-dev Vulkan0`/`Vulkan1`).                         |
+| [`run/start-llama-server.sh`](run/start-llama-server.sh)                                     | **Main launcher.** Vulkan by default (auto-detects the Vega 8 Vulkan device). `--cpu`/`--rocm-docker`/`--rocm` modes. |
+| [`run/run-llamaserver-vulkan.sh`](run/run-llamaserver-vulkan.sh)         | Direct Vulkan llama-server wrapper with full device selection (`-dev VulkanN`).                                   |
 | [`run/run-docker-rocm.sh`](run/run-docker-rocm.sh)                       | Docker ROCm 6.2.4 launcher. Auto-builds `build/Dockerfile.rocm64` image on first run.                            |
 | [`run/run-llamaserver-rocm.sh`](run/run-llamaserver-rocm.sh)             | Legacy native ROCm wrapper — broken on host (HIP 5.7.1/Clang-21 mismatch); kept for reference.                    |
 | [`build/build-llamacpp-rocm-vega.sh`](build/build-llamacpp-rocm-vega.sh) | Build llama.cpp with ROCm/HIP targeting gfx900 (used inside Docker, or for host experiments).                     |
@@ -74,11 +77,22 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## ROCm on Vega 8
 
-**Host ROCm (HIP 5.7.1) is broken** — Ubuntu 25.10 ships HIP 5.7.1 paired with Clang-21, a ~2 major version mismatch. Individual GPU kernel tests pass, but inference segfaults at slot initialization regardless of model, flags, or layer count. Use `run/run-docker-rocm.sh` (ROCm 6.2.4), `run/run-docker-rocm7.sh` (ROCm 7.2), or the baremetal ROCm 7.2 install.
+**Status (June 2026):**
 
-**Docker ROCm 6.2.4 works.** Running llama.cpp in a `rocm/dev-ubuntu-24.04:6.2.4` container provides a coherent stack. Full 41/41 layer GPU offload confirmed on Qwen3.5-35B-A3B-Q4_K_M (20 GB model into 64 GB GTT).
+| Path                                | Status | Notes                                                                |
+| ----------------------------------- | ------ | -------------------------------------------------------------------- |
+| **Docker ROCm 7.2** (`run/run-docker-rocm7.sh`) | ✅ working — **needs 64 GB GTT** | 35B-A3B re-verified 2026-06-13 (20.4 prefill / 15.9 decode t/s). **Requires the GTT GRUB params** (below) — without them the 35B overflows GTT and hard-freezes the PC |
+| **Docker ROCm 6.2.4** (`run/run-docker-rocm.sh`) | ⚠️ unverified on current host | Self-contained `rocm/dev-ubuntu-24.04:6.2.4` image; was working before the May 2026 host changes |
+| **Baremetal ROCm 7.2** (`run/run-rocm7-baremetal.sh`) | ❌ broken on current host | Host ROCm was replaced by modular `amdrocm-core` 7.13/7.14 (gfx120x, for the R9700s) |
+| Baremetal HIP 5.7.1 (Ubuntu repo)   | ❌ broken | HIP 5.7.1 + Clang-21 mismatch — segfaults at slot init               |
 
-**ROCm 7.2 baremetal works** (confirmed 2026-05-14). Install via `setup/install-rocm7-host.sh`, build via `build/build-llamacpp-rocm7-baremetal.sh`, run via `run/run-rocm7-baremetal.sh`. Two Ubuntu 25.10 workarounds required: use AMD's noble/24.04 packages (ABI-compatible), and create `sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2` for ROCm LLVM.
+**Why baremetal broke:** the gfx900-on-gfx90c technique needs (a) `HSA_OVERRIDE_GFX_VERSION=9.0.0`, which the new modular ROCr **rejects** (crashes with `HSA_STATUS_ERROR_OUT_OF_RESOURCES`), and (b) gfx900 rocBLAS tensile kernels, which the gfx120x-only packages **don't ship** (the old backported files were wiped from `/opt/rocm/lib/rocblas/library/`). Note the new runtime *does* enumerate the Vega natively as gfx90c, and hipcc 7.13 still compiles gfx90c code — but rocBLAS has no gfx9 kernels at all, and llama.cpp's prefill GEMMs require rocBLAS, so a native gfx90c rebuild can't work either (it would need rocBLAS/Tensile built from source for gfx90c). `run/run-rocm7-baremetal.sh` detects all of this and fails early with instructions.
+
+**Docker is the only ROCm path that initialises at all** — both images bundle their own complete ROCm userspace (where the gfx version override still works) and only share the kernel driver with the host. Small models (7B) load and run.
+
+> ⚠️ **Large models on ROCm REQUIRE the 64 GB GTT GRUB params.** On 2026-06-13, loading **Qwen3.5-35B-A3B-Q4_K_M** (20 GB) via ROCm Docker **hard-froze the entire PC within ~3 seconds** — because a fresh Ubuntu reinstall had left GRUB without `amdgpu.gttsize=65536 ttm.pages_limit=16777216`, so the Vega 8 had only ~30 GB GTT and the allocation overflowed it. **With those params restored (64 GB GTT), the 35B loads to ~21 GB and runs fine** (re-verified 2026-06-13: 20.4 prefill / 15.9 decode t/s). Confirm with `cat /proc/cmdline | grep gttsize` and that the Vega 8 reports `65536M of GTT memory ready`. Without the params, do **not** load >~10 GB models on ROCm — use Vulkan (`./run/start-llama-server.sh`, the default) for large models instead. See [Model Capacity](#model-capacity) for the GRUB setup.
+
+**Baremetal ROCm 7.2 worked before the host ROCm swap** (confirmed 2026-05-14) and still applies to hosts with classic ROCm 7.0–7.2 packages: install via `setup/install-rocm7-host.sh`, build via `build/build-llamacpp-rocm7-baremetal.sh`, run via `run/run-rocm7-baremetal.sh`. Two Ubuntu 25.10 workarounds required: use AMD's noble/24.04 packages (ABI-compatible), and create `sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2` for ROCm LLVM. The install script now refuses to run if modular `amdrocm-core` packages are present (they'd conflict over `/opt/rocm` and could break the R9700 setup).
 
 ```bash
 # Start (auto-builds image on first run, ~10 min)
@@ -108,16 +122,18 @@ The `run/run-docker-rocm.sh` script applies several crucial flags to maximize in
 * `--ulimit memlock=-1`: Allows unlimited locked memory pages. ROCm relies on memory pinning to stream data between system RAM and the GPU cores without CPU pagetable management. Docker's default limit severely bottlenecks ROCm or causes crashes.
 
 #### `llama.cpp` Flags
-* `-fa 1` (Flash Attention): Significantly reduces memory bandwidth overhead and allows larger context sizes. Essential for APUs where memory bandwidth is the primary bottleneck.
+* `-fa 0` (Flash Attention OFF): benchmarked faster for ROCm on Vega 8 — FA ON costs 33–83 % prefill (see [docs/benchmarks.md](docs/benchmarks.md)). The launch scripts default to `-fa 0` for ROCm and `-fa 1` for CPU, where FA ON wins.
 * `-ngl 99`: Offloads all layers to the GPU.
+* `-b 2048 -ub 2048` (full-batch prefill): **~+22 % prefill at 4K context** on the Vega 8 vs the default `-ub 512`, no decode cost — now the default in `run/run-docker-rocm7.sh`. Smaller `-ub` *hurts* (under-fills the 8-CU GEMMs). See [docs/benchmarks.md](docs/benchmarks.md#rocm-72--vega-8-tuning-sweep-2026-06).
+* `-ctk q8_0` (optional): quantize the K cache — small decode gain at long context (+3.5 % @4K) and halves K-cache memory. K-only, since `-ctv` needs flash attention (which loses on Vega).
 * `-t N` (Recommended to add at runtime): Set to your physical CPU core count (e.g., `-t 4` or `-t 8`). Prevents CPU thrashing and saves thermal/power budget for the Vega iGPU.
 * `-nkvo` (`--no-kv-offload`): **Do not use unless necessary!** Forces the Key-Value (KV) cache to stay in standard CPU RAM instead of VRAM. Only use this if your model is so large that adding a context window crashes the GPU with Out-of-Memory (OOM) errors.
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#docker-rocm-624-workaround-working-legacy-solution) for full details and the FP8 stub patch needed for gfx900.
 
-### ROCm 7.2 on Vega 8 — Default ROCm Path
+### ROCm 7.2 on Vega 8 — the gfx900 backport technique
 
-**Status: confirmed working** (2026-05-14, Qwen3.5-35B-A3B-Q4_K_M, full 41/41 layer offload, sustained inference stable). ROCm 7.x officially dropped `gfx900` support, but the technique used by
+**Status: working in Docker** (re-verified 2026-06-13; baremetal variant requires classic ROCm 7.2 on the host — see status table above). ROCm 7.x officially dropped `gfx900` support, but the technique used by
 [garymathews/frigate:440056a-rocm-7.2.0](https://github.com/garymathews/frigate/releases/tag/440056a-rocm-7.2.0)
 (originally for Frigate NVR / MIGraphX object detection) can be adapted for llama.cpp:
 
@@ -135,7 +151,11 @@ docker build -t llama-rocm7-vega -f build/Dockerfile.rocm7-vega build/
 ./run/run-docker-rocm7.sh /path/to/model.gguf -ngl 99 -c 2048
 ```
 
-#### Option B — Baremetal (ROCm 7.2 installed on host — confirmed working)
+#### Option B — Baremetal (requires classic ROCm 7.2 on the host)
+
+> ⚠ Broken on the current host since the modular `amdrocm-core` 7.13+/gfx120x
+> packages replaced ROCm 7.2 (May 2026). The scripts below now detect this and
+> abort with a pointer to Option A. Kept for hosts running classic ROCm 7.0–7.2.
 
 ```bash
 # One-time host setup (Ubuntu 25.10 — uses noble/24.04 AMD packages)
@@ -153,7 +173,7 @@ bash build/build-llamacpp-rocm7-baremetal.sh --skip-backport
 bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192
 ```
 
-> **Device index note:** With RX 9700 also present, Vega 8 is ROCm GPU index **1** (not 0). The run script auto-detects this, but if running manually set `ROCR_VISIBLE_DEVICES=1`.
+> **Device index note:** The Vega 8's ROCm GPU index depends on which dGPUs are installed (currently **2**, after the two R9700s). The run script auto-detects it; override with `VEGA8_ROCM_DEVICE=N` if needed. When setting manually, remember `HIP_VISIBLE_DEVICES` indexes into the `ROCR_VISIBLE_DEVICES`-filtered list, so use `ROCR_VISIBLE_DEVICES=<idx> HIP_VISIBLE_DEVICES=0`.
 
 ## LM Studio (Vulkan)
 
@@ -259,5 +279,9 @@ amd-vega-rocm-vulkan-llm-toolkit/
 - [x] **Compare ROCm 6.x vs ROCm 7.x inference speed on Vega 8** — both benefit from `-fa 0`; ROCm 7 FA OFF (70 t/s) edges out ROCm 6 FA OFF (64 t/s) at 1K/4K context; CPU FA ON wins overall (233 t/s at 4K)
 - [x] **Adopt improvements from mixa3607/ML-gfx906** (same GCN5/Vega arch, gfx906): disable `GGML_HIP_GRAPHS` everywhere (stability fix), add `GGML_BACKEND_DL=ON` + `GGML_CPU_ALL_VARIANTS=ON` to ROCm 7 builds, apply to ROCm 6 Docker too, add `numactl` to Docker images, `hipconfig`-based HIP compiler auto-detection in build scripts
 - [x] Benchmark ROCm 7 builds after `GGML_HIP_GRAPHS=OFF` + `GGML_BACKEND_DL=ON` — rebuild succeeded 2026-05-14; **re-benchmarking needed** to compare before/after performance
+- [x] **Hardware change (June 2026):** RTX 5090 removed, second Radeon AI PRO R9700 added; host ROCm replaced by modular `amdrocm-core` 7.13/7.14 (gfx120x) — Vega 8 is now ROCm GPU index 2 / `renderD130`
+- [x] **Toolkit fixes (2026-06-13):** repaired broken Vega-8 ROCm index auto-detect (always returned 0 → would select an R9700), fixed `HIP_VISIBLE_DEVICES` misuse, removed dangerous `HSA_XNACK=1` from the benchmark runner, added preflight guards for the modular-ROCm host, switched default launcher backend to Vulkan, removed dead CMake flags (`GGML_HIP_UMA`, `GGML_FLASH_ATTN`); Vulkan + Docker ROCm 7.2 paths re-verified on hardware
+- [ ] **ROCm 7.2 / Vega 8 tuning sweep (in progress, June 2026):** baseline 35B → `-ub`/`-b` batch sizes → `-ctk q8_0` K-cache quant → `rocm-smi --setperflevel high` → maybe `-DGGML_CUDA_FORCE_MMQ=ON`. Harness: `bench/tune-rocm7-vega.sh`. Ceiling analysis (no hardware dp4a, DDR4 bandwidth-bound) in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/benchmarks.md](docs/benchmarks.md)
 - [ ] Document `numactl --membind=0 llama-server` usage for NUMA-sensitive workloads
+- [ ] **Restore baremetal ROCm on Vega 8 under modular ROCm:** needs rocBLAS/Tensile built from source for gfx90c (no override, native arch) — large effort, Docker path covers the use case meanwhile
 - [ ] **Future / community:** Vega 56/64 (gfx900) and Radeon VII/MI50/MI60 (gfx906) discrete GPU support — PyTorch, ComfyUI, vLLM. See [docs/ARCHITECTURE.md — Future: Vega 56/64](docs/ARCHITECTURE.md) and [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906). Forks and PRs welcome.

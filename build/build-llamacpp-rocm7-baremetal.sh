@@ -23,16 +23,14 @@
 #   --skip-backport  Skip the tensile library backport step
 #                    (use if you already ran it once and /opt/rocm still has the files)
 #
-# After build (Vega 8 iGPU — with Radeon 9700 AI Pro also present on this system):
-#   Check Vega 8 agent index first:  rocminfo | grep -B2 -A5 'gfx90'
-#   Then run:
-#   export ROCR_VISIBLE_DEVICES=1   # index of Vega 8 in rocminfo agent list on this system
-#   export HIP_VISIBLE_DEVICES=0
-#   export HSA_OVERRIDE_GFX_VERSION=9.0.0
-#   export HSA_ENABLE_SDMA=0
-#   export HSA_XNACK=0
-#   export GGML_HIP_UMA=1
-#   ./llm/rocm7-vega/bin/llama-server -m /path/to/model.gguf -ngl 99
+# After build, prefer the launcher (auto-detects the Vega 8 agent index and
+# sets all required HSA env vars):
+#   ./run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192 -fa 0
+#
+# IMPORTANT: this path requires ROCm 7.0–7.2 on the host. AMD's newer modular
+# packages (amdrocm-core 7.13+/gfx120x) ship a ROCr that rejects
+# HSA_OVERRIDE_GFX_VERSION and a rocBLAS without gfx9 kernels — the gfx900
+# backport cannot work there. Use build/Dockerfile.rocm7-vega instead.
 #
 
 set -euo pipefail
@@ -105,6 +103,21 @@ check_prereqs() {
     if ! command -v hipcc &>/dev/null && ! [ -x "${ROCM_PATH:-}/bin/hipcc" ]; then
         echo "✗  hipcc not found"
         ok=false
+    fi
+
+    # The gfx900 path needs a ROCr runtime that accepts HSA_OVERRIDE_GFX_VERSION.
+    # AMD's modular packages (amdrocm-core 7.13+/gfx120x) reject it — the build
+    # would succeed but inference can never run. Fail early instead.
+    if [ -n "${ROCM_PATH:-}" ] && [ -x "$ROCM_PATH/bin/rocminfo" ]; then
+        if ! HSA_OVERRIDE_GFX_VERSION=9.0.0 "$ROCM_PATH/bin/rocminfo" &>/dev/null; then
+            echo "✗  This ROCm runtime rejects HSA_OVERRIDE_GFX_VERSION=9.0.0,"
+            echo "   which the gfx900-on-gfx90c path requires. This happens with"
+            echo "   AMD's modular ROCm packages (amdrocm-core 7.13+/gfx120x)."
+            echo "   Use the Docker image instead (self-contained ROCm 7.2):"
+            echo "     docker build -t llama-rocm7-vega -f build/Dockerfile.rocm7-vega build/"
+            echo "     ./run/run-docker-rocm7.sh /path/to/model.gguf"
+            ok=false
+        fi
     fi
 
     if ! command -v git &>/dev/null; then
@@ -253,14 +266,15 @@ export ROCM_PATH
 # ROCm 7 has native FP8 types, so no FP8 typedef stub patch needed.
 # Code object version: ROCm 7 LLVM defaults to COv6 which its runtime supports.
 
+# Note: GGML_HIP_UMA and GGML_FLASH_ATTN are no longer llama.cpp CMake
+# options (UMA was removed upstream; FA is a runtime flag, -fa). GPU_TARGETS
+# replaces the deprecated AMDGPU_TARGETS spelling.
 cmake -B build-rocm7 \
     -DGGML_HIP=ON \
-    -DAMDGPU_TARGETS="$AMDGPU_TARGET" \
+    -DGPU_TARGETS="$AMDGPU_TARGET" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
     -DGGML_HIP_GRAPHS=OFF \
-    -DGGML_HIP_UMA=ON \
-    -DGGML_FLASH_ATTN=ON \
     -DGGML_BACKEND_DL=ON \
     -DGGML_CPU_ALL_VARIANTS=ON \
     -DLLAMA_BUILD_SERVER=ON \
@@ -286,15 +300,17 @@ echo "════════════════════════�
 echo ""
 echo "  Binaries: $INSTALL_DIR/bin/"
 echo ""
-echo "  Run with required environment variables:"
-echo "  (Vega 8 iGPU — verify its index: rocminfo | grep -B2 -A5 'gfx90')"
+echo "  Run via the launcher (auto-detects the Vega 8 index, sets HSA env):"
 echo ""
-echo "    export ROCR_VISIBLE_DEVICES=1   # Vega 8 is GPU index 1 (verify with rocminfo)"
-echo "    export HIP_VISIBLE_DEVICES=0"
+echo "    ./run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192 -fa 0"
+echo ""
+echo "  Or manually:"
+echo ""
+echo "    export ROCR_VISIBLE_DEVICES=<idx>  # Vega 8 GPU index from rocminfo"
+echo "    export HIP_VISIBLE_DEVICES=0       # index within the ROCR mask"
 echo "    export HSA_OVERRIDE_GFX_VERSION=9.0.0"
 echo "    export HSA_ENABLE_SDMA=0"
-echo "    export HSA_XNACK=0"
-echo "    export GGML_HIP_UMA=1"
+echo "    export HSA_XNACK=0                 # =1 freezes the whole PC on Vega 8"
 echo "    export GPU_MAX_ALLOC_PERCENT=100"
 echo ""
 echo "    $INSTALL_DIR/bin/llama-server \\"

@@ -53,8 +53,10 @@ if [ ! -f "$MODEL" ]; then
 fi
 
 # ─── Detect Vega 8 ROCm agent index ─────────────────────────────────────────
-# rocminfo lists agents; Vega 8 shows as gfx90x (typically gfx900 or gfx90c).
-# We scan for the first agent matching gfx90 and record its 0-based index.
+# rocminfo prints each agent's short "Name: gfxXXX" line BEFORE its
+# "Device Type: GPU" line, so we remember the last seen name and assign
+# 0-based GPU indices in enumeration order (same order ROCR_VISIBLE_DEVICES
+# uses). Vega APUs are gfx900/gfx902/gfx909/gfx90c.
 
 detect_vega8_rocm_index() {
     if [ -n "${VEGA8_ROCM_DEVICE:-}" ]; then
@@ -63,62 +65,81 @@ detect_vega8_rocm_index() {
     fi
 
     local rocminfo_bin="$ROCM_PATH/bin/rocminfo"
-    if [ ! -x "$rocminfo_bin" ]; then
+    [ -x "$rocminfo_bin" ] || rocminfo_bin="$(command -v rocminfo || true)"
+    if [ -z "$rocminfo_bin" ]; then
         echo "0"   # fallback
         return
     fi
 
-    # Count GPU agents before hitting gfx90x — that gives us the 0-based device index
-    local gpu_index=0
-    local found_index=""
-    while IFS= read -r line; do
-        if echo "$line" | grep -q "^Agent [0-9]"; then
-            : # new agent block starting
-        fi
-        if echo "$line" | grep -qi "gfx90"; then
-            found_index="$gpu_index"
-            break
-        fi
-        if echo "$line" | grep -qi "Device Type.*GPU"; then
-            gpu_index=$((gpu_index))
-        fi
-        if echo "$line" | grep -q "^Agent [0-9]"; then
-            # We reset the per-agent GPU count only when an agent block restarts
-            :
-        fi
-    done < <("$rocminfo_bin" 2>/dev/null)
-
-    # Simpler fallback: just find "gfx90" and count preceding GPU agents
-    if [ -z "$found_index" ]; then
-        # Count GPU agents that appear before the first gfx90x entry
-        found_index=$("$rocminfo_bin" 2>/dev/null | awk '
-            /Device Type.*GPU/ { gpu_count++ }
-            /gfx90/ { print gpu_count - 1; exit }
-        ' || echo "0")
-    fi
-
-    echo "${found_index:-0}"
+    "$rocminfo_bin" 2>/dev/null | awk '
+        $1 == "Name:" && $2 ~ /^gfx/  { name = $2 }
+        /Device Type:[[:space:]]+GPU/ {
+            if (name ~ /^gfx90[029c]$/) { print gpu; found = 1; exit }
+            gpu++
+        }
+        END { if (!found) print 0 }
+    '
 }
 
 VEGA8_IDX=$(detect_vega8_rocm_index)
 echo "  Vega 8 ROCm device index: $VEGA8_IDX"
 
+# ─── Preflight: host ROCm must still support the gfx900 path ────────────────
+# This launcher needs two things from the host ROCm install:
+#   1. gfx900 rocBLAS tensile kernels (backported from ROCm 6.3.4 by
+#      build/build-llamacpp-rocm7-baremetal.sh)
+#   2. a ROCr runtime that accepts HSA_OVERRIDE_GFX_VERSION=9.0.0
+# AMD's newer modular packages (e.g. amdrocm-core7.14-gfx120x) provide
+# neither — installing them replaces /opt/rocm and breaks this path.
+# In that case use the self-contained Docker image instead:
+#   ./run/run-docker-rocm7.sh /path/to/model.gguf
+# Set SKIP_ROCM_CHECKS=1 to bypass these checks.
+
+if [ -z "${SKIP_ROCM_CHECKS:-}" ]; then
+    GFX900_KERNELS=$(find -L "$ROCM_PATH/lib/rocblas/library" -name '*gfx900*' 2>/dev/null | wc -l)
+    if [ "$GFX900_KERNELS" -eq 0 ]; then
+        echo "✗  No gfx900 rocBLAS kernels in $ROCM_PATH/lib/rocblas/library"
+        echo "   The host ROCm install cannot run llama.cpp on the Vega 8 (first"
+        echo "   GEMM will fail). This happens when the gfx900 tensile backport is"
+        echo "   missing or the host ROCm was replaced (e.g. by amdrocm-core gfx120x"
+        echo "   packages for RDNA4 cards)."
+        echo ""
+        echo "   Options:"
+        echo "     • Use Docker (self-contained ROCm 7.2 + backport, still works):"
+        echo "         ./run/run-docker-rocm7.sh $MODEL"
+        echo "     • Or reinstall ROCm 7.2 + backport:  setup/install-rocm7-host.sh"
+        echo "       then build/build-llamacpp-rocm7-baremetal.sh"
+        exit 1
+    fi
+    if ! HSA_OVERRIDE_GFX_VERSION=9.0.0 ROCR_VISIBLE_DEVICES="$VEGA8_IDX" \
+            "$ROCM_PATH/bin/rocminfo" >/dev/null 2>&1; then
+        echo "✗  HSA_OVERRIDE_GFX_VERSION=9.0.0 crashes this ROCr runtime"
+        echo "   (newer modular ROCm builds reject the gfx version override)."
+        echo "   Use Docker instead:  ./run/run-docker-rocm7.sh $MODEL"
+        exit 1
+    fi
+fi
+
 # ─── Environment ─────────────────────────────────────────────────────────────
 #
+# ROCR_VISIBLE_DEVICES=<idx> — expose only the Vega 8 to the HSA runtime.
+# HIP_VISIBLE_DEVICES=0 — HIP indexes into the ROCR-filtered list, where the
+#   Vega 8 is the only (first) device. Do NOT set this to the rocminfo index.
 # HSA_OVERRIDE_GFX_VERSION=9.0.0 — Vega 8 APU (gfx90c) overridden to gfx900
-#   so that gfx900 tensile kernels are loaded.
+#   so that gfx900 code objects and tensile kernels are loaded.
 # HSA_ENABLE_SDMA=0 — disable System DMA; required for stability on Vega 8 APU
 #   (SDMA engine not present / unreliable on integrated Vega).
-# GGML_HIP_UMA=1 — Unified Memory Access: model weights accessed via CPU-mapped
-#   pointers rather than HIP memcpy; required for iGPU with shared DRAM.
+# HSA_XNACK=0 — XNACK=1 hard-freezes the entire PC on Vega 8.
 # GPU_MAX_ALLOC_PERCENT=100 — allow full GTT allocation (64 GB on this system).
+#
+# Note: GGML_HIP_UMA was removed from llama.cpp; plain hipMalloc into GTT is
+# what the May 2026 benchmarks used and needs no extra env var.
 
 export ROCR_VISIBLE_DEVICES="$VEGA8_IDX"
-export HIP_VISIBLE_DEVICES="$VEGA8_IDX"
+export HIP_VISIBLE_DEVICES=0
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
 export HSA_ENABLE_SDMA=0
 export HSA_XNACK=0
-export GGML_HIP_UMA=1
 export GPU_MAX_ALLOC_PERCENT=100
 
 # Prepend the baremetal lib dir (contains RPATH-relative libs from build),
@@ -137,4 +158,8 @@ exec "$LLAMA_BIN" \
     -m "$MODEL" \
     --host 0.0.0.0 \
     --port 8080 \
+    -b 2048 -ub 2048 \
     "$@"
+# -ub 2048 (full-batch prefill): ~+22% prefill at 4K ctx on the Vega 8 vs the
+# default -ub 512, no decode cost (docs/benchmarks.md, measured on the Docker
+# path). Overridable — pass your own -b/-ub after the model.

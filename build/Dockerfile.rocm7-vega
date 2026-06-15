@@ -86,13 +86,14 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .
 #  ROCm 7 HIP has native FP8 types — no FP8 typedef stub patch needed.
 #  Code object version: ROCm 7 LLVM defaults to COv6; runtime supports it.
 #
+# GGML_HIP_UMA / GGML_FLASH_ATTN are no longer llama.cpp CMake options
+# (UMA removed upstream; FA is the runtime -fa flag). GPU_TARGETS replaces
+# the deprecated AMDGPU_TARGETS spelling.
 RUN cmake -B build \
       -DGGML_HIP=ON \
-      -DAMDGPU_TARGETS="gfx900" \
+      -DGPU_TARGETS="gfx900" \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_HIP_GRAPHS=OFF \
-      -DGGML_HIP_UMA=ON \
-      -DGGML_FLASH_ATTN=ON \
       -DGGML_BACKEND_DL=ON \
       -DGGML_CPU_ALL_VARIANTS=ON \
       -DLLAMA_BUILD_SERVER=ON \
@@ -111,8 +112,6 @@ ENV HSA_OVERRIDE_GFX_VERSION=9.0.0
 ENV HSA_ENABLE_SDMA=0
 # XNACK=0: prevents PC hang / system freeze on Vega 8 iGPU
 ENV HSA_XNACK=0
-# UMA=0: with XNACK=0 disabled, UMA page-fault handling causes segfaults
-ENV GGML_HIP_UMA=0
 # Allow GPU to use up to 100% of its visible VRAM (shared system RAM on APU)
 ENV GPU_MAX_ALLOC_PERCENT=100
 ENV GPU_SINGLE_ALLOC_PERCENT=100

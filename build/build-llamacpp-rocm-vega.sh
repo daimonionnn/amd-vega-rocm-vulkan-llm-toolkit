@@ -176,7 +176,6 @@ cmake -B build \
     -DCMAKE_INSTALL_RPATH="\$ORIGIN" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
     -DGGML_HIP_GRAPHS=OFF \
-    -DGGML_HIP_UMA=ON \
     -DLLAMA_BUILD_SERVER=ON \
     -DLLAMA_BUILD_EXAMPLES=ON \
     -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,muldefs" \
@@ -204,7 +203,7 @@ echo "  ─── Option A: Use llama-server standalone ───"
 echo ""
 echo "    export HSA_OVERRIDE_GFX_VERSION=9.0.0"
 echo "    export HSA_ENABLE_SDMA=0"
-echo "    export GGML_HIP_UMA=1"
+echo "    export HSA_XNACK=0"
 echo "    $INSTALL_DIR/bin/llama-server \\"
 echo "      -m /path/to/model.gguf \\"
 echo "      -ngl 99 \\"
@@ -241,7 +240,6 @@ echo "    # Close LM Studio and launch it from a terminal with:"
 echo "    #   export HSA_OVERRIDE_GFX_VERSION=9.0.0"
 echo "    #   export HSA_ENABLE_SDMA=0"
 echo "    #   export HSA_XNACK=0"
-echo "    #   export GGML_HIP_UMA=0"
 echo "    #   /path/to/lmstudio"
 echo ""
 echo "  ─── Option C: Use with LM Studio API ───"

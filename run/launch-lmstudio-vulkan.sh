@@ -31,7 +31,8 @@
 #   - HSA_OVERRIDE_GFX_VERSION=9.0.0 for tools only (rocminfo, rocm-smi)
 #
 # Hardware: AMD Ryzen 7 5700G - Vega 8 (gfx90c / Renoir)
-# PCI:      0b:00.0 -> /dev/dri/renderD129, /dev/dri/card2
+# PCI:      auto-detected by device ID 0x1638 (render node moves when
+#           discrete GPUs are added/removed — renderD130 as of June 2026)
 # VRAM:     16 GB UMA (BIOS) + ~23 GB GTT (shared system RAM)
 #
 # TIP: Increase VRAM in BIOS (UMA Frame Buffer Size) to 16GB for best results.
@@ -71,16 +72,17 @@ done
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
 
 # ─── Vulkan device selection (PRIMARY BACKEND) ───
-# GPU0 = AMD Radeon Graphics (RADV RENOIR) — the Vega 8 iGPU
-# GPU1 = NVIDIA GeForce RTX 5090
-# GPU2 = llvmpipe (software)
-# Force llama.cpp (inside LM Studio) to use the AMD iGPU for Vulkan compute
+# RADV device order (June 2026):
+#   GPU0 = AMD Radeon Graphics (RADV RENOIR) — the Vega 8 iGPU
+#   GPU1 = AMD Radeon AI PRO R9700 (RADV GFX1201)
+#   GPU2 = AMD Radeon AI PRO R9700 (RADV GFX1201)
+# Force llama.cpp (inside LM Studio) to use the iGPU for Vulkan compute.
+# Verify with: llm/vulkan/bin/llama-server --list-devices
 export GGML_VK_DEVICE=0
 
-# Only expose the AMD RADV Vulkan driver (hide NVIDIA and llvmpipe)
+# Only expose the AMD RADV Vulkan driver (hide llvmpipe and any other ICDs).
 # LM Studio hides integrated GPUs when a discrete GPU is also visible,
-# so we must restrict to AMD-only for the Vega 8 to appear in the UI.
-# To use the RTX 5090, use the CUDA runtime in LM Studio instead.
+# so restricting to RADV keeps the Vega 8 selectable in the UI.
 export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json"
 
 # ─── AMD GPU memory tuning (critical for APU shared memory) ───
@@ -91,11 +93,6 @@ export GPU_SINGLE_ALLOC_PERCENT=100
 export GPU_MAX_HEAP_SIZE=100
 # ROCm: disable SDMA — known to cause hangs/crashes on APU iGPUs
 export HSA_ENABLE_SDMA=0
-export HCC_SERIALIZE_KERNEL=3
-export HCC_SERIALIZE_COPY=3
-# Tell llama.cpp this is a UMA (Unified Memory Architecture) APU
-# This changes memory allocation strategy to use system RAM directly
-export GGML_HIP_UMA=1
 
 # ─── AMD GPU performance ───
 # Use high-performance power profile when running inference
@@ -103,8 +100,20 @@ export GPU_FORCE_64BIT_PTR=1
 export ROC_ENABLE_PRE_VEGA=1
 
 # ─── Render device hint ───
-# Point to the AMD APU render node explicitly
-export DRI_PRIME=pci-0000_0b_00.0
+# Point to the AMD APU render node explicitly. The PCI address moves when
+# discrete GPUs are added/removed, so detect it by PCI device ID (0x1638).
+VEGA8_PCI_ADDR=""
+VEGA8_RENDER_NODE=""
+for _node in /sys/class/drm/renderD*/device; do
+    if [ "$(cat "$_node/device" 2>/dev/null)" = "0x1638" ]; then
+        VEGA8_RENDER_NODE="/dev/dri/$(basename "$(dirname "$_node")")"
+        VEGA8_PCI_ADDR="$(basename "$(readlink -f "$_node")")"   # e.g. 0000:10:00.0
+        break
+    fi
+done
+if [ -n "$VEGA8_PCI_ADDR" ]; then
+    export DRI_PRIME="pci-${VEGA8_PCI_ADDR//[:.]/_}"
+fi
 
 # ─── Verify prerequisites ───
 check_prereqs() {
@@ -178,14 +187,14 @@ show_config() {
     echo "  Backend mode:          $BACKEND_MODE"
     echo "  Vulkan device:         GPU0 (RADV RENOIR)"
     echo "  Vulkan ICD:            radeon_icd.json (AMD only)"
-    echo "  Render node:           /dev/dri/renderD129"
+    echo "  Render node:           ${VEGA8_RENDER_NODE:-not detected}"
     echo ""
     echo "  Key environment:"
     echo "    HSA_OVERRIDE_GFX_VERSION = $HSA_OVERRIDE_GFX_VERSION (for diag tools only)"
     echo "    GGML_VK_DEVICE           = $GGML_VK_DEVICE"
     echo "    VK_ICD_FILENAMES         = $VK_ICD_FILENAMES"
     echo "    GPU_MAX_ALLOC_PERCENT    = $GPU_MAX_ALLOC_PERCENT"
-    echo "    GGML_HIP_UMA             = $GGML_HIP_UMA"
+    echo "    DRI_PRIME                = ${DRI_PRIME:-unset}"
     echo ""
 
     # Show VRAM/GTT if rocm-smi is available

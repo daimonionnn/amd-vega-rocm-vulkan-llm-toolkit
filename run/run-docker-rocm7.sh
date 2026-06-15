@@ -3,10 +3,10 @@
 # Run llama-server (ROCm 7 / Vega 8 build) inside Docker.
 # Mirrors run-docker-rocm.sh but targets the ROCm 7 experimental image.
 #
-# With multiple AMD GPUs (Vega 8 iGPU + Radeon 9700 AI Pro dGPU) this script
+# With multiple AMD GPUs (Vega 8 iGPU + Radeon AI PRO R9700 dGPUs) this script
 # auto-detects the Vega 8 render node by PCI device ID and passes ONLY that
 # device into the container.  ROCR_VISIBLE_DEVICES=0 inside the container is
-# therefore always the Vega 8, never the 9700.
+# therefore always the Vega 8, never an R9700.
 #
 # Usage:
 #   ./run-docker-rocm7.sh /path/to/model.gguf [llama-server options]
@@ -29,8 +29,9 @@ MODEL_NAME="$(basename "$MODEL")"
 shift
 
 # ── Detect Vega 8 render node by PCI device ID ───────────────────────────────────────
-# Ryzen 5700G Vega 8 = PCI device ID 0x1638  (gfx90c) — confirmed on /dev/dri/renderD129
-# Override with VEGA8_RENDER_NODE=/dev/dri/renderDXXX if auto-detect fails.
+# Ryzen 5700G Vega 8 = PCI device ID 0x1638 (gfx90c). The render node number
+# moves when discrete GPUs change (renderD130 as of June 2026) — hence PCI-ID
+# detection. Override with VEGA8_RENDER_NODE=/dev/dri/renderDXXX if it fails.
 VEGA8_PCI_ID="0x1638"
 VEGA8_RENDER_NODE="${VEGA8_RENDER_NODE:-}"
 
@@ -95,4 +96,8 @@ docker run --rm $TTY_FLAG \
   -m "/models/$MODEL_NAME" \
   -fa 0 \
   -ngl 99 \
+  -b 2048 -ub 2048 \
   "$@"
+# -ub 2048 (full-batch prefill): benchmarked ~+22% prefill at 4K ctx on the
+# Vega 8 vs the default -ub 512, no decode cost (docs/benchmarks.md tuning sweep,
+# 2026-06). Overridable — pass your own -b/-ub after the model to change it.

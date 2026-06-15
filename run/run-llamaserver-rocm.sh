@@ -58,27 +58,25 @@ export HCC_SERIALIZE_KERNEL=3
 export HCC_SERIALIZE_COPY=3
 # HSA_XNACK must be 0 on Vega8 iGPU otherwise it will freeze whole PC
 export HSA_XNACK=${HSA_XNACK:-0}   # 0=xnack-, 1=xnack+; must match build target
-export GGML_HIP_UMA=0
 export GPU_MAX_ALLOC_PERCENT=100
 export GPU_SINGLE_ALLOC_PERCENT=100
 export GPU_MAX_HEAP_SIZE=100
 export GPU_FORCE_64BIT_PTR=1
 export HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0}
-export DRI_PRIME=pci-0000_0b_00.0
 
-# ─── Pre-flight: warn if GRUB params are missing ───
-# These kernel params fix ROCm memory faults and allow mapping large amounts of RAM as VRAM:
-#   amdgpu.cwsr_enable=0     — Disable compute wave save/restore (fixes ROCm crashes on Vega APUs)
-#   amd_iommu=on             — Enable IOMMU to prevent "page not present" memory faults
-#   amdgpu.gttsize=65536     — Set Graphics Translation Table size to 64GB (amounts AMD driver wants to map)
-#   ttm.pages_limit=16777216 — Set Translation Table Maps limit to 64GB (amount kernel is allowed to give, 16.7M * 4KB)
-# Note: Both gttsize and ttm.pages_limit are required together to bypass the default 8GB limit.
-# Ref: https://medium.com/@agentz/how-to-fix-rocm-pytorch-memory-faults-on-amd-gpus-segmentation-fault-page-not-present-544b9f62f627
+# ─── Pre-flight: warn if GRUB params for large GTT are missing ───
+# These kernel params allow mapping large amounts of RAM as VRAM for big models:
+#   amdgpu.gttsize=65536     — Set Graphics Translation Table size to 64GB
+#   ttm.pages_limit=16777216 — Set TTM page limit to 64GB (16.7M * 4KB)
+# Note: Both are required together to bypass the default 8GB limit.
+#
+# NOTE: do NOT add amdgpu.cwsr_enable=0 — testing (see docs/benchmarks.md)
+# showed it prevents the large Qwen model from loading. Leave CWSR at default.
 CMDLINE=$(cat /proc/cmdline 2>/dev/null || true)
-if ! echo "$CMDLINE" | grep -q 'amdgpu.cwsr_enable=0'; then
-    echo "⚠  Kernel param 'amdgpu.cwsr_enable=0' not detected."
-    echo "   CWSR (compute wave save/restore) can crash Vega APUs under ROCm."
-    echo "   Add to GRUB and reboot:  sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 amdgpu.cwsr_enable=0 amd_iommu=on amdgpu.gttsize=65536 ttm.pages_limit=16777216\"/' /etc/default/grub && sudo update-grub"
+if ! echo "$CMDLINE" | grep -q 'amdgpu.gttsize'; then
+    echo "⚠  Kernel param 'amdgpu.gttsize=65536' not detected."
+    echo "   Large models (>8 GB) need a bigger GTT. Add to GRUB and reboot:"
+    echo "   sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 amdgpu.gttsize=65536 ttm.pages_limit=16777216\"/' /etc/default/grub && sudo update-grub"
     echo ""
 fi
 
@@ -89,9 +87,7 @@ echo ""
 echo "  Model:  $MODEL"
 echo "  Args:   $*"
 echo "  GPU:    gfx90c → gfx900 (override)"
-echo "  UMA:    disabled (GGML_HIP_UMA=0)"
-echo "  CWSR:   $(cat /sys/module/amdgpu/parameters/cwsr_enable 2>/dev/null || echo '?') (need 0)"
-echo "  IOMMU:  $(grep -q 'amd_iommu=on' /proc/cmdline 2>/dev/null && echo 'off' || echo 'on (may crash)')"
+echo "  GTT:    $(grep -q 'amdgpu.gttsize' /proc/cmdline 2>/dev/null && echo 'large (gttsize set)' || echo 'default 8GB — large models may OOM')"
 echo ""
 echo "  API endpoint: http://127.0.0.1:8080/v1"
 echo "  (Use Ctrl+C to stop)"

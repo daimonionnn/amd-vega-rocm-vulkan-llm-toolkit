@@ -18,12 +18,13 @@ RUN for HIP_FP8 in __hip_fp8_e4m3 __hip_fp8_e5m2 __hip_fp8_e4m3_fnuz __hip_fp8_e
         ggml/src/ggml-cuda/vendors/hip.h; \
     done && echo 'FP8 typedef patch applied'
 
+# GGML_FLASH_ATTN is not a llama.cpp CMake option (FA is the runtime -fa
+# flag). GPU_TARGETS replaces the deprecated AMDGPU_TARGETS spelling.
 RUN cmake -B build \
       -DGGML_HIP=ON \
-      -DAMDGPU_TARGETS="gfx900" \
+      -DGPU_TARGETS="gfx900" \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_HIP_GRAPHS=OFF \
-      -DGGML_FLASH_ATTN=ON \
       -DGGML_BACKEND_DL=ON \
       -DGGML_CPU_ALL_VARIANTS=ON && \
     cmake --build build --config Release -j$(nproc)
@@ -38,8 +39,6 @@ ENV HSA_OVERRIDE_GFX_VERSION=9.0.0
 ENV HSA_ENABLE_SDMA=0
 # HSA_XNACK=0: prevents PC hang on Vega 8 iGPU (XNACK=1 freezes whole system)
 ENV HSA_XNACK=0
-# GGML_HIP_UMA=0: with XNACK=0, UMA causes segfaults (page-fault handling disabled)
-ENV GGML_HIP_UMA=0
 ENV GPU_MAX_ALLOC_PERCENT=100
 ENV GPU_SINGLE_ALLOC_PERCENT=100
 ENV GPU_MAX_HEAP_SIZE=100

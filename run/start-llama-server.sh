@@ -1,24 +1,28 @@
 #!/bin/bash
 # start-llama-server.sh — Launch llama-server on Vega 8 iGPU
 #
-# Defaults to ROCm 7.2 baremetal (best GPU prefill, no Docker needed).
+# Defaults to Vulkan / Mesa RADV (best decode, works on any host ROCm state).
 # Model defaults to Qwen3.5-35B-A3B-Q4_K_M — override with MODEL= env var.
 #
 # Usage:
-#   ./run/start-llama-server.sh                # ROCm 7.2 baremetal (default)
-#   ./run/start-llama-server.sh --vulkan       # Vulkan / Mesa RADV
+#   ./run/start-llama-server.sh                # Vulkan / Mesa RADV (default)
 #   ./run/start-llama-server.sh --cpu          # CPU only (no GPU offload)
-#   ./run/start-llama-server.sh --rocm-docker  # ROCm 7.2 via Docker
+#   ./run/start-llama-server.sh --rocm-docker  # ROCm 7.2 via Docker (recommended ROCm path)
+#   ./run/start-llama-server.sh --rocm         # ROCm 7.2 baremetal (needs ROCm 7.2 host install)
 #
 # Environment variables:
 #   MODEL=/path/to/model.gguf        — override default model path
 #   CTX=8192                         — context size (default: 8192)
 #   PORT=8080                        — server port  (default: 8080)
 #
-# Backends at a glance (Vega 8 iGPU, Qwen3.5-35B-A3B-Q4_K_M):
-#   ROCm 7.2 baremetal  — prefill ~68 t/s @ 4K ctx, decode ~14 t/s
+# Backends at a glance (Vega 8 iGPU, Qwen3.5-35B-A3B-Q4_K_M, May 2026):
 #   Vulkan (Mesa RADV)  — prefill ~50 t/s @ 4K ctx, decode ~20 t/s  ← best decode
 #   CPU only            — prefill ~233 t/s @ 4K ctx, decode ~13 t/s ← best prefill
+#   ROCm 7.2            — prefill ~68 t/s @ 4K ctx, decode ~14 t/s  ← best GPU prefill
+#
+# Note: ROCm 7.2 baremetal requires gfx900 support on the host. AMD's modular
+# ROCm packages (amdrocm-core 7.13+/gfx120x) break it — the launcher detects
+# this and tells you to use --rocm-docker instead. See README "ROCm on Vega 8".
 #
 # See docs/benchmarks.md for full comparison.
 
@@ -32,31 +36,54 @@ MODEL="${MODEL:-$HOME/.lmstudio/models/lmstudio-community/Qwen3.5-35B-A3B-GGUF/Q
 PORT="${PORT:-8080}"
 CTX="${CTX:-8192}"
 
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+free_port() {
+    local pid
+    pid=$(lsof -ti :"$PORT" 2>/dev/null) || true
+    if [ -n "$pid" ]; then
+        echo "Killing existing process $pid on :$PORT"
+        kill -9 "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+}
+
+# The Vega 8 shows up as "RADV RENOIR" in llama.cpp's Vulkan device list.
+# Its index can shift when discrete GPUs are added/removed, so detect it.
+detect_vega_vulkan_dev() {
+    local dev
+    dev=$(LD_LIBRARY_PATH="$SCRIPT_DIR/../llm/vulkan/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$SCRIPT_DIR/../llm/vulkan/bin/llama-server" --list-devices 2>/dev/null \
+        | awk -F: '/RENOIR/ { gsub(/^[ \t]+/, "", $1); print $1; exit }') || true
+    echo "${dev:-Vulkan0}"
+}
+
+banner() {
+    echo "  Backend: $1"
+    echo "  API:     http://127.0.0.1:$PORT/v1"
+    echo ""
+}
+
 # ─── Parse mode ──────────────────────────────────────────────────────────────
 
 MODE="${1:-}"
 
 case "$MODE" in
-    --vulkan)
-        shift
-        echo "  Backend: Vulkan (Mesa RADV / Vega 8)"
-        echo "  API:     http://127.0.0.1:$PORT/v1"
-        echo ""
-        PID=$(lsof -ti :"$PORT" 2>/dev/null) || true
-        [ -n "$PID" ] && { echo "Killing existing process $PID on :$PORT"; kill -9 "$PID" 2>/dev/null || true; sleep 1; }
+    ""|--vulkan)
+        [ -n "$MODE" ] && shift || true
+        VULKAN_DEV="$(detect_vega_vulkan_dev)"
+        banner "Vulkan (Mesa RADV / Vega 8, $VULKAN_DEV)"
+        free_port
         exec "$SCRIPT_DIR/run-llamaserver-vulkan.sh" \
             "$MODEL" \
             -ngl 99 -c "$CTX" --port "$PORT" --no-warmup \
-            -dev Vulkan0 -fa 1 \
+            -dev "$VULKAN_DEV" -fa 1 \
             "$@"
         ;;
     --cpu)
         shift
-        echo "  Backend: CPU only (no GPU offload)"
-        echo "  API:     http://127.0.0.1:$PORT/v1"
-        echo ""
-        PID=$(lsof -ti :"$PORT" 2>/dev/null) || true
-        [ -n "$PID" ] && { echo "Killing existing process $PID on :$PORT"; kill -9 "$PID" 2>/dev/null || true; sleep 1; }
+        banner "CPU only (no GPU offload)"
+        free_port
         exec "$SCRIPT_DIR/run-llamaserver-vulkan.sh" \
             "$MODEL" \
             -ngl 0 -c "$CTX" --port "$PORT" --no-warmup \
@@ -65,41 +92,35 @@ case "$MODE" in
         ;;
     --rocm-docker)
         shift
-        echo "  Backend: ROCm 7.2 Docker"
-        echo "  API:     http://127.0.0.1:$PORT/v1"
-        echo ""
-        PID=$(lsof -ti :"$PORT" 2>/dev/null) || true
-        [ -n "$PID" ] && { echo "Killing existing process $PID on :$PORT"; kill -9 "$PID" 2>/dev/null || true; sleep 1; }
+        banner "ROCm 7.2 Docker"
+        free_port
         exec "$SCRIPT_DIR/run-docker-rocm7.sh" \
             "$MODEL" \
             -ngl 99 -c "$CTX" --port "$PORT" --no-warmup \
             -fa 0 \
             "$@"
         ;;
-    --help|-h)
-        echo "Usage: $0 [--vulkan|--cpu|--rocm-docker|--help]"
-        echo ""
-        echo "  (default)       ROCm 7.2 baremetal — best GPU prefill, no Docker"
-        echo "  --vulkan        Vulkan / Mesa RADV  — best decode throughput"
-        echo "  --cpu           CPU only            — best prefill at large context"
-        echo "  --rocm-docker   ROCm 7.2 in Docker  — same perf as baremetal"
-        echo ""
-        echo "Env vars: MODEL=  CTX=  PORT="
-        echo ""
-        exit 0
-        ;;
-    ""|--rocm|--rocm7|--baremetal)
-        [ -n "$MODE" ] && shift || true
-        echo "  Backend: ROCm 7.2 baremetal (Vega 8, gfx900)"
-        echo "  API:     http://127.0.0.1:$PORT/v1"
-        echo ""
-        PID=$(lsof -ti :"$PORT" 2>/dev/null) || true
-        [ -n "$PID" ] && { echo "Killing existing process $PID on :$PORT"; kill -9 "$PID" 2>/dev/null || true; sleep 1; }
+    --rocm|--rocm7|--baremetal)
+        shift
+        banner "ROCm 7.2 baremetal (Vega 8, gfx900)"
+        free_port
         exec "$SCRIPT_DIR/run-rocm7-baremetal.sh" \
             "$MODEL" \
             -ngl 99 -c "$CTX" --port "$PORT" --no-warmup \
             -fa 0 \
             "$@"
+        ;;
+    --help|-h)
+        echo "Usage: $0 [--vulkan|--cpu|--rocm-docker|--rocm|--help]"
+        echo ""
+        echo "  (default)       Vulkan / Mesa RADV  — best decode throughput"
+        echo "  --cpu           CPU only            — best prefill at large context"
+        echo "  --rocm-docker   ROCm 7.2 in Docker  — best GPU prefill, self-contained"
+        echo "  --rocm          ROCm 7.2 baremetal  — needs ROCm 7.2 + gfx900 backport on host"
+        echo ""
+        echo "Env vars: MODEL=  CTX=  PORT="
+        echo ""
+        exit 0
         ;;
     *)
         echo "Unknown option: $MODE"

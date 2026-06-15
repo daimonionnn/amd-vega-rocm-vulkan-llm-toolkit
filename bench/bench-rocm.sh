@@ -18,16 +18,16 @@ if [ ! -x "$BENCH_BIN" ]; then
     exit 1
 fi
 
-# Apply the same safe ROCm logic we've discovered for this APU setup
+# Apply the same safe ROCm env as the run/ scripts:
+# SDMA off (unreliable on integrated Vega), XNACK off (=1 freezes the PC).
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
-export HSA_ENABLE_SDMA=1
-export HCC_SERIALIZE_KERNEL=3
-export HCC_SERIALIZE_COPY=3
-export GGML_HIP_UMA=1
+export HSA_ENABLE_SDMA=0
+export HSA_XNACK=0
+export GPU_MAX_ALLOC_PERCENT=100
 
 echo "=========================================================="
 echo " Starting ROCm/HIP llama-bench for Vega 8 (gfx90c/900)"
-echo " Environment overrides applied (HSA, SDMA, HCC_SERIALIZE)"
+echo " Environment overrides applied (HSA override, SDMA/XNACK off)"
 echo " Model: $MODEL"
 echo "=========================================================="
 

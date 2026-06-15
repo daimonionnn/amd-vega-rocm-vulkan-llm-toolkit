@@ -10,13 +10,14 @@
 #   ./run-llamaserver-vulkan.sh ~/models/llama-7b-q4.gguf -ngl 99
 #   ./run-llamaserver-vulkan.sh ~/models/llama-7b-q4.gguf -ngl 99 -dev Vulkan0
 #
-# Devices on this system (see: llama-server --list-devices):
-#   Vulkan0 = AMD Radeon Graphics (RADV RENOIR / Vega 8 iGPU)  ~24 GB shared
-#   Vulkan1 = NVIDIA GeForce RTX 5090                          ~32 GB dedicated
+# Devices on this system (see: llama-server --list-devices, June 2026):
+#   Vulkan0 = AMD Radeon Graphics (RADV RENOIR / Vega 8 iGPU)   ~32 GB shared
+#   Vulkan1 = AMD Radeon AI PRO R9700 (RADV GFX1201)            32 GB dedicated
+#   Vulkan2 = AMD Radeon AI PRO R9700 (RADV GFX1201)            32 GB dedicated
 #
-# Performance (Llama 2 7B Q4_K_S, -ngl 99 -c 512):
-#   Vulkan0 (Vega 8):   ~49 t/s prompt,  ~14 t/s generation
-#   Vulkan1 (RTX 5090): ~2117 t/s prompt, ~273 t/s generation
+# Device order can shift when GPUs are added/removed — verify with
+# --list-devices, or use run/start-llama-server.sh which auto-detects the
+# Vega 8 (RADV RENOIR) index.
 #
 
 set -euo pipefail
@@ -36,8 +37,8 @@ if [ $# -eq 0 ] || [[ "$1" == --help ]] || [[ "$1" == -h ]]; then
     echo ""
     echo "Examples:"
     echo "  $0 ~/models/llama-7b-q4.gguf -ngl 99                # auto-select GPU"
-    echo "  $0 ~/models/llama-7b-q4.gguf -ngl 99 -dev Vulkan1   # force RTX 5090"
-    echo "  $0 ~/models/llama-7b-q4.gguf -ngl 99 -dev Vulkan0   # force Vega 8"
+    echo "  $0 ~/models/llama-7b-q4.gguf -ngl 99 -dev Vulkan0   # force Vega 8 (RADV RENOIR)"
+    echo "  $0 ~/models/llama-7b-q4.gguf -ngl 99 -dev Vulkan1   # force R9700 (RADV GFX1201)"
     echo ""
     echo "Available devices:"
     LD_LIBRARY_PATH="$LLAMA_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

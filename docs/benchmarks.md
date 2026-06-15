@@ -6,6 +6,16 @@ Compact benchmark log for llama.cpp on AMD Ryzen 7 5700G / Radeon Vega 8. Latest
 
 **Latest run:** `bench/run-all-benchmarks.sh`, completed `12 / 12` backend × model combinations at `2026-05-15 00:26`.
 
+> **Environment changes since this run (June 2026):** the RTX 5090 was removed and a
+> second Radeon AI PRO R9700 added — the Vega 8 is now `/dev/dri/renderD130` and ROCm
+> GPU index 2 (the parameters below record the May 2026 layout). The host's classic
+> ROCm 7.2 was replaced by modular `amdrocm-core` 7.13/7.14 (gfx120x), which **breaks
+> the ROCm 7 baremetal rows' reproducibility on this host** — use the Docker ROCm
+> backends instead (re-verified working 2026-06-13). The benchmark runner has also been
+> changed to auto-detect the Vega 8 index and to use the documented-safe HSA env
+> (`HSA_XNACK=0`, `HSA_ENABLE_SDMA=0` — the run below used `XNACK=1`/`SDMA=1`), so
+> future baremetal numbers may differ slightly.
+
 ### Current benchmark parameters
 
 | Area                         | Current setting                                                                                                      |
@@ -13,8 +23,8 @@ Compact benchmark log for llama.cpp on AMD Ryzen 7 5700G / Radeon Vega 8. Latest
 | BIOS UMA / iGPU VRAM         | **2 GB**                                                                                                             |
 | OS / kernel                  | Ubuntu 25.10, kernel 6.17                                                                                            |
 | CPU                          | AMD Ryzen 7 5700G, 8C/16T, Zen 3, AVX2/FMA                                                                           |
-| Target GPU                   | Radeon Vega 8 iGPU, gfx90c/gfx900-compatible, `/dev/dri/renderD129`                                                  |
-| Other GPUs                   | RX 9700 AI Pro present but not used by benchmark scripts                                                |
+| Target GPU                   | Radeon Vega 8 iGPU, gfx90c/gfx900-compatible (`/dev/dri/renderD129` at run time; `renderD130` as of June 2026)       |
+| Other GPUs                   | RX 9700 AI Pro present but not used by benchmark scripts (June 2026: 2× R9700, RTX 5090 removed)        |
 | Context                      | `-c 8192`                                                                                                            |
 | Prompt sizes                 | `128`, `1024`, `4096` requested; effective prompts about `140/141`, `937`, `3330` tokens                             |
 | Decode length                | `50` generated tokens                                                                                                |
@@ -22,16 +32,105 @@ Compact benchmark log for llama.cpp on AMD Ryzen 7 5700G / Radeon Vega 8. Latest
 | GPU offload                  | `-ngl 99` for ROCm/Vulkan, `-ngl 0` for CPU                                                                          |
 | Vulkan device                | `-dev Vulkan0` to pin RADV RENOIR / Vega 8                                                                           |
 | ROCm 7 baremetal binary      | `llm/rocm7-vega/bin/llama-server`                                                                                    |
-| ROCm 7 build flags           | `GGML_HIP_GRAPHS=OFF`, `GGML_BACKEND_DL=ON`, `GGML_CPU_ALL_VARIANTS=ON`                                              |
-| ROCm 7 build flags, GPU      | `GGML_HIP_UMA=ON`, `AMDGPU_TARGETS=gfx900`                                                                           |
-| ROCm 7 env, device           | `ROCR_VISIBLE_DEVICES=1`, `HIP_VISIBLE_DEVICES=0`, `HSA_OVERRIDE_GFX_VERSION=9.0.0`                                  |
-| ROCm 7 env, memory/runtime   | `HSA_ENABLE_SDMA=1`, `HSA_XNACK=1`, `GGML_HIP_UMA=1`, `GPU_MAX_ALLOC_PERCENT=100`                                    |
+| ROCm 7 build flags           | `GGML_HIP_GRAPHS=OFF`, `GGML_BACKEND_DL=ON`, `GGML_CPU_ALL_VARIANTS=ON`, `GPU_TARGETS=gfx900`                        |
+| ROCm 7 env, device           | `ROCR_VISIBLE_DEVICES=1` (Vega 8 index at run time; now 2), `HIP_VISIBLE_DEVICES=0`, `HSA_OVERRIDE_GFX_VERSION=9.0.0` |
+| ROCm 7 env, memory/runtime   | run used `HSA_ENABLE_SDMA=1`, `HSA_XNACK=1`; **now `=0`/`=0`** (XNACK=1 can freeze the PC), `GPU_MAX_ALLOC_PERCENT=100` |
 | Docker ROCm env              | Docker sees only Vega 8 render node, so `ROCR_VISIBLE_DEVICES=0`, `HIP_VISIBLE_DEVICES=0`                            |
 | Result directory             | `/tmp/bench-results-20260515-001400/`                                                                                |
 
 **Kernel/ROCm stability note:** do **not** force `amdgpu.cwsr_enable=0` for this setup. With that parameter set, the large Qwen model did not load and crashed during loading. Leave CWSR at the driver default unless re-testing explicitly.
 
 **Large-model memory note:** Qwen 35B Q4 needs the large UMA/GTT path despite the 2 GB BIOS frame buffer. The 64 GB GTT workaround remains the known path for full offload of ~20 GB models: `amdgpu.gttsize=65536 ttm.pages_limit=16777216`. For small models that fit in the BIOS carveout, previous testing showed smaller GTT/BIOS allocation can improve throughput.
+
+---
+
+## ROCm 7.2 / Vega 8 tuning sweep (2026-06)
+
+Goal: find any runtime/build tweak that improves the **working ROCm 7.2 Docker** path
+on the Vega 8. Background and rationale in
+[ARCHITECTURE.md — Performance ceiling and tuning levers](ARCHITECTURE.md#performance-ceiling-and-tuning-levers-gfx900--vega-8):
+gfx900 has **no hardware dp4a** (MMQ runs emulated) and decode is **DDR4-bandwidth-bound**,
+so expectations are modest — prefill batch tuning is the best bet; Vulkan still wins decode.
+
+**Fixed conditions:** model `Qwen3.5-35B-A3B-Q4_K_M` (20 GB, full offload), ROCm 7.2 Docker
+image `llama-rocm7-vega`, `-ngl 99 -fa 0 --no-warmup`, prompts ~140 / 937 / 3330 tokens,
+50 decode tokens. Each config = fresh container. Harness: `bench/tune-rocm7-vega.sh`.
+
+**Configs tested:**
+1. Baseline — `-c 8192` (current `run-docker-rocm7.sh` defaults)
+2. ubatch sweep — `-b 2048 -ub {256, 1024, 2048}` (default ub is 512)
+3. K-cache quant — baseline + `-ctk q8_0`
+4. GPU clocks — baseline with host `rocm-smi --setperflevel high` (Vega 8 = card3)
+5. (conditional) build `-DGGML_CUDA_FORCE_MMQ=ON` and A/B vs baseline
+
+> Results table populated by the sweep run — see below.
+
+<!-- TUNING_RESULTS -->
+> **First attempt (aborted):** the initial sweep hard-froze the whole PC within ~3 s
+> of loading the 35 B — because a fresh Ubuntu reinstall had left GRUB without the
+> 64 GB-GTT params (`amdgpu.gttsize=65536 ttm.pages_limit=16777216`), so the Vega 8
+> had only ~30 GB GTT and the 20 GB allocation overflowed it. After restoring the
+> params + reboot (Vega 8 → 64 GB GTT), the 35 B loads to ~21 GB and the sweep ran
+> clean. **These params are mandatory for large models on ROCm.**
+
+**Results (2026-06-13, 35B-A3B-Q4_K_M, ROCm 7.2 Docker, `-ngl 99 -fa 0 -c 8192`):**
+
+Prefill (t/s):
+
+| Config | ~140 tok | ~937 tok | ~3330 tok |
+| --- | --- | --- | --- |
+| baseline (`-ub 512`) | 41.0 | 69.8 | 68.9 |
+| `-ub 256` | 41.0 | 54.4 | 54.3 |
+| `-ub 1024` | 41.1 | 81.1 | 78.6 |
+| **`-ub 2048`** | 41.0 | 80.6 | **84.0** |
+| `-ctk q8_0` | 41.2 | 69.1 | 67.9 |
+
+Decode (t/s):
+
+| Config | ~140 tok | ~937 tok | ~3330 tok |
+| --- | --- | --- | --- |
+| baseline | 16.0 | 15.2 | 12.6 |
+| `-ub 2048` | 16.0 | 15.2 | 12.6 |
+| **`-ctk q8_0`** | 15.7 | 15.3 | **13.0** |
+
+**Findings:**
+- **`-ub 2048` (full-batch prefill) is a clean win: +22 % prefill at 4 K ctx
+  (84 vs 69 t/s), +15 % at 1 K, no decode penalty.** Now the default in
+  `run/run-docker-rocm7.sh`. Smaller `-ub 256` *hurts* (under-fills the 8-CU GEMMs).
+- **`-ctk q8_0`** gives a small decode bump at large context (13.0 vs 12.6 t/s,
+  +3.5 %) and halves K-cache memory — worth adding for long-context decode.
+  (`-ctv` needs flash attention, which loses on Vega, so K-only with `-fa 0`.)
+- Decode is otherwise **flat across all configs** — confirming it's DDR4-bandwidth-
+  bound, not batch-bound, exactly as the ceiling analysis predicted. The decode win
+  remains on Vulkan (~19–20 t/s).
+**GPU clocks — `power_dpm_force_performance_level=high` (35B, `-ub 2048`):**
+
+| metric | auto | high | Δ |
+| --- | --- | --- | --- |
+| prefill @937 | 80.6 | 82.8 | +2.7% |
+| prefill @3330 | 84.0 | 86.9 | +3.4% |
+| decode @937 | 15.2 | 15.7 | +3.3% |
+| decode @3330 | 12.6 | 12.7 | +0.8% |
+
+Pinning clocks (GPU hit 2400 MHz under load) is a **real but small win (~+3% prefill)**.
+Costs: needs root, not persistent across reboots, and draws more power continuously
+on a shared-TDP APU. Optional, not a default.
+
+**`-DGGML_CUDA_FORCE_MMQ=ON` (rebuilt in-image, A/B at high clocks + `-ub 2048`):**
+
+| metric | default (cuBLAS dispatch) | FORCE_MMQ | Δ |
+| --- | --- | --- | --- |
+| prefill @3330 | 86.9 | 86.9 | ~0% |
+| prefill @937 | 82.8 | 83.1 | +0.4% |
+| decode @3330 | 12.7 | 13.0 | +1.8% (noise) |
+
+**A wash** — neither the prefill regression expected from emulated dp4a nor any real
+gain. Not adopted; the default MMQ/cuBLAS auto-dispatch is fine on gfx900.
+
+**Net conclusion:** the one keeper is **`-ub 2048`** (~+22% prefill at 4K, now the
+default in `run/run-docker-rocm7.sh`). `-ctk q8_0` is a minor opt-in for long-context
+decode. Clock-pinning and FORCE_MMQ are not worth the cost/complexity. Decode stays
+bandwidth-bound (~13 t/s on ROCm vs ~19–20 on Vulkan), as the ceiling analysis predicted.
 
 ---
 
