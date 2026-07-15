@@ -8,7 +8,7 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 | ----------- | ------------------------------------------------------------------------- |
 | CPU/APU     | AMD Ryzen 7 5700G (8C/16T, Zen 3) — slightly undervolted: Curve Optimizer all-core offset −10 |
 | iGPU        | Radeon Vega 8 — gfx90c (GCN 5, 8 CUs, 512 MB dedicated + UMA shared RAM)  |
-| dGPU 1+2    | 2× AMD Radeon AI PRO R9700 (RDNA4 / gfx1201, 32 GB VRAM each)             |
+| dGPU 1+2    | 2× AMD Radeon AI PRO R9700 (RDNA4 / gfx1201, 32 GB VRAM each) — June 2026 benchmark layout; one sold July 2026, lineup in flux (device indexes shift, but the scripts auto-detect the Vega 8) |
 | RAM         | 64 GB DDR4 — 2× 32 GB Kingston Fury 3600 MT/s, overclocked to 4200 MT/s (shared with the Vega 8 iGPU via UMA) |
 | Motherboard | ASRock Fatal1ty B450 Gaming-ITX/ac                                        |
 | OS          | Ubuntu 25.10 "Questing", kernel 6.17                                      |
@@ -289,6 +289,15 @@ amd-vega-rocm-vulkan-llm-toolkit/
 - [ ] Extract the copy-pasted Vega 8 detection (PCI-ID render node + rocminfo agent index) into one shared, sourced helper — currently duplicated across `run/` and `bench/` scripts
 - [ ] Make the server port configurable end-to-end — the Docker launchers hardcode the `-p 8080:8080` mapping, so `PORT=` in `run/start-llama-server.sh` only works for the Vulkan/CPU/baremetal modes
 - [ ] Pin llama.cpp to a tested commit in the Dockerfiles and build scripts (they track `master`, so builds are not reproducible; upstream flag renames have already broken builds once)
-- [ ] Benchmark the R9700s (Vulkan1/2 + native gfx1201 ROCm) alongside the Vega 8 in `bench/run-all-benchmarks.sh` for an iGPU-vs-dGPU comparison on the same harness
+- [ ] **Speculative decoding on Vega 8** — decode is DDR4-bandwidth-bound (~25–30 t/s ceiling for the 35B-A3B at 4200 MT/s); draft-token batching is the only lever past that ceiling since drafted tokens are verified in one batched pass over the weights. Test `llama-server -md <draft.gguf> --draft-max 16 --draft-min 1` with a small same-family draft (e.g. Qwen3.5-0.5B/1.7B Q4). Expected +30–80 % decode if acceptance rate is good; works today on the iGPU alone, and if a dGPU accelerator is installed later, pin the draft to it with `--device-draft`
+- [ ] **MoE hybrid CPU+iGPU experiment** — CPU prefill (233 t/s) beats GPU prefill (84 t/s); try `--override-tensor "ffn_.*_exps.*=CPU"` to run the expert FFNs on the CPU while attention/shared weights stay on the iGPU. On UMA there is no transfer penalty — only the compute engine changes — so this is a cheap test with real upside for prefill
+- [ ] **Quant-format decode sweep** — decode is bandwidth-bound, so smaller quants can win despite costlier dequant: benchmark Q4_K_M vs IQ4_XS vs Q4_0 of the same model on Vulkan and ROCm
+- [ ] **RAM timing tune + FCLK check** — decode scales ~linearly with DDR4 bandwidth: tighten secondary/tertiary timings at 4200 MT/s and verify FCLK runs 1:1 (2100 MHz — Cezanne usually manages it; 2:1 costs latency). Re-run `bench/run-all-benchmarks.sh` after
+- [ ] **Raise PPT / PBO power limit** — stock 65 W PPT throttles sustained iGPU clocks under combined CPU+iGPU load; the all-core −10 undervolt is already applied, a higher PPT is the next lever
+- [ ] **Transparent Huge Pages experiment** — `transparent_hugepage=always` reduces TLB pressure on large GTT allocations; cheap A/B benchmark
+- [ ] **Benchmark methodology** — the 50-token decode window is noisy: raise to 256+, add 2–3 repeats with stddev, log power via `rocm-smi` for perf/W, and add standard `llama-bench` pp512/tg128 rows for cross-project comparability
+- [ ] **Track upstream llama.cpp** — after pinning (above), bump the pin periodically and re-run the benchmark suite as a regression/gain check (the Vulkan backend improves fast); same for host Mesa/RADV updates
+- [ ] **CI smoke checks** — GitHub Action running `shellcheck` + `bash -n` over `run/ bench/ build/` and `py_compile` over the python benches
+- [ ] **Future accelerator (AMD or NVIDIA dGPU)** — the R9700s are on their way out (one sold July 2026, the second — which had hardware issues — may follow). If a dGPU returns: benchmark it on this same harness and use it as the draft-model device for speculative decoding on the Vega 8 (`--device-draft`)
 - [ ] **Restore baremetal ROCm on Vega 8 under modular ROCm:** needs rocBLAS/Tensile built from source for gfx90c (no override, native arch) — large effort, Docker path covers the use case meanwhile
 - [ ] **Future / community:** Vega 56/64 (gfx900) and Radeon VII/MI50/MI60 (gfx906) discrete GPU support — PyTorch, ComfyUI, vLLM. See [docs/ARCHITECTURE.md — Future: Vega 56/64](docs/ARCHITECTURE.md) and [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906). Forks and PRs welcome.
