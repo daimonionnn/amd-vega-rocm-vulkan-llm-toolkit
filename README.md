@@ -4,14 +4,17 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 
 ## Hardware
 
-| Component | Detail                                                                   |
-| --------- | ------------------------------------------------------------------------ |
-| CPU/APU   | AMD Ryzen 7 5700G (8C/16T, Zen 3)                                        |
-| iGPU      | Radeon Vega 8 — gfx90c (GCN 5, 8 CUs, 512 MB dedicated + UMA shared RAM) |
-| dGPU 1+2  | 2× AMD Radeon AI PRO R9700 (RDNA4 / gfx1201, 32 GB VRAM each)            |
-| RAM       | 64 GB DDR4 (shared with Vega 8 iGPU via UMA)                             |
-| OS        | Ubuntu 25.10 "Questing", kernel 6.17                                     |
-| Host ROCm | AMD modular packages (`amdrocm-core` 7.13/7.14, gfx120x — for the R9700s) |
+| Component   | Detail                                                                    |
+| ----------- | ------------------------------------------------------------------------- |
+| CPU/APU     | AMD Ryzen 7 5700G (8C/16T, Zen 3) — slightly undervolted: Curve Optimizer all-core offset −10 |
+| iGPU        | Radeon Vega 8 — gfx90c (GCN 5, 8 CUs, 512 MB dedicated + UMA shared RAM)  |
+| dGPU 1+2    | 2× AMD Radeon AI PRO R9700 (RDNA4 / gfx1201, 32 GB VRAM each)             |
+| RAM         | 64 GB DDR4 — 2× 32 GB Kingston Fury 3600 MT/s, overclocked to 4200 MT/s (shared with the Vega 8 iGPU via UMA) |
+| Motherboard | ASRock Fatal1ty B450 Gaming-ITX/ac                                        |
+| OS          | Ubuntu 25.10 "Questing", kernel 6.17                                      |
+| Host ROCm   | AMD modular packages (`amdrocm-core` 7.13/7.14, gfx120x — for the R9700s) |
+
+> **Why the RAM overclock matters:** on an APU the iGPU has no dedicated VRAM — all weights and KV cache live in UMA/GTT system RAM, so decode throughput is directly bound by DDR4 bandwidth (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). All benchmark numbers in this repo were measured with this exact memory tune (4200 MT/s); stock 3200–3600 MT/s will decode proportionally slower.
 
 > **GPU targeting note:** Scripts in this toolkit explicitly target the **Vega 8 iGPU**, auto-detected by PCI ID `0x1638` (`/dev/dri/renderD130` as of June 2026 — the node number moves when dGPUs change). ROCm agent order: GPU 0+1 = gfx1201 (R9700s), GPU 2 = gfx90c (Vega 8) — baremetal scripts auto-detect this index (override with `VEGA8_ROCM_DEVICE=N`). Docker scripts pass only the Vega render node into the container so `ROCR_VISIBLE_DEVICES=0` applies there. Vulkan scripts auto-detect the `RADV RENOIR` device (currently `Vulkan0`). The R9700s are not used by these scripts unless you explicitly change device selection.
 
@@ -283,5 +286,9 @@ amd-vega-rocm-vulkan-llm-toolkit/
 - [x] **Toolkit fixes (2026-06-13):** repaired broken Vega-8 ROCm index auto-detect (always returned 0 → would select an R9700), fixed `HIP_VISIBLE_DEVICES` misuse, removed dangerous `HSA_XNACK=1` from the benchmark runner, added preflight guards for the modular-ROCm host, switched default launcher backend to Vulkan, removed dead CMake flags (`GGML_HIP_UMA`, `GGML_FLASH_ATTN`); Vulkan + Docker ROCm 7.2 paths re-verified on hardware
 - [ ] **ROCm 7.2 / Vega 8 tuning sweep (in progress, June 2026):** baseline 35B → `-ub`/`-b` batch sizes → `-ctk q8_0` K-cache quant → `rocm-smi --setperflevel high` → maybe `-DGGML_CUDA_FORCE_MMQ=ON`. Harness: `bench/tune-rocm7-vega.sh`. Ceiling analysis (no hardware dp4a, DDR4 bandwidth-bound) in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/benchmarks.md](docs/benchmarks.md)
 - [ ] Document `numactl --membind=0 llama-server` usage for NUMA-sensitive workloads
+- [ ] Extract the copy-pasted Vega 8 detection (PCI-ID render node + rocminfo agent index) into one shared, sourced helper — currently duplicated across `run/` and `bench/` scripts
+- [ ] Make the server port configurable end-to-end — the Docker launchers hardcode the `-p 8080:8080` mapping, so `PORT=` in `run/start-llama-server.sh` only works for the Vulkan/CPU/baremetal modes
+- [ ] Pin llama.cpp to a tested commit in the Dockerfiles and build scripts (they track `master`, so builds are not reproducible; upstream flag renames have already broken builds once)
+- [ ] Benchmark the R9700s (Vulkan1/2 + native gfx1201 ROCm) alongside the Vega 8 in `bench/run-all-benchmarks.sh` for an iGPU-vs-dGPU comparison on the same harness
 - [ ] **Restore baremetal ROCm on Vega 8 under modular ROCm:** needs rocBLAS/Tensile built from source for gfx90c (no override, native arch) — large effort, Docker path covers the use case meanwhile
 - [ ] **Future / community:** Vega 56/64 (gfx900) and Radeon VII/MI50/MI60 (gfx906) discrete GPU support — PyTorch, ComfyUI, vLLM. See [docs/ARCHITECTURE.md — Future: Vega 56/64](docs/ARCHITECTURE.md) and [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906). Forks and PRs welcome.

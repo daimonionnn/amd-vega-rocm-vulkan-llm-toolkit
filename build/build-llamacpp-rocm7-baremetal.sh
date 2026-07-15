@@ -36,6 +36,9 @@
 set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────────────
+# TODO: pin LLAMA_CPP_BRANCH to a tested tag/commit instead of tracking master
+#       (non-reproducible builds; upstream CMake flag renames have already
+#       bitten this repo — GGML_HIP_UMA, AMDGPU_TARGETS → GPU_TARGETS).
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_BRANCH="master"
 BUILD_DIR="$(realpath -m "$(dirname "$0")/../llm/build")"

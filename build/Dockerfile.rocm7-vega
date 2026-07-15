@@ -77,6 +77,9 @@ RUN set -eux; \
     echo "=== gfx900 tensile backport complete ==="
 
 # ── Clone llama.cpp ───────────────────────────────────────────────────────────
+# TODO: pin to a tested commit (ARG LLAMA_CPP_REF) — cloning master makes image
+#       builds non-reproducible, and upstream flag renames have already broken
+#       builds here once (GGML_HIP_UMA / AMDGPU_TARGETS removal).
 WORKDIR /app
 RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .
 

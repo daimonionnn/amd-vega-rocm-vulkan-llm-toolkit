@@ -40,6 +40,9 @@ SERVER_WAIT_TIMEOUT=120
 PROMPT_SIZES=(128 1024 4096)
 
 # Number of tokens to generate per decode measurement
+# TODO: this setting is currently ignored — the inline python in run_bench()
+#       hardcodes its own GEN_TOKENS=50. Pass it through as an argv, the way
+#       bench/tune-rocm7-vega.sh already does.
 GEN_TOKENS=50
 
 # Where to write per-backend result CSVs  (label, prompt_words, ctx_tokens, prefill, decode)
@@ -57,6 +60,8 @@ ROCM6_LLAMA_BIN=""   # override: /opt/rocm6/bin/llama-server
 # Comment out any line here to skip that backend.
 # Format: "LABEL:FA_FLAG:START_FUNC"
 # =============================================================================
+# TODO: add R9700 rows (Vulkan1/2 and native gfx1201 ROCm) so the iGPU and the
+#       dGPUs can be compared on the same harness and models.
 ENABLED_BACKENDS=(
     # ── ROCm 7.2 via Docker (recommended ROCm path — self-contained image) ───
     "ROCm-7.2-Docker-FA-OFF:-fa 0:start_rocm7_docker"
@@ -228,6 +233,10 @@ start_vulkan_gpu() {
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     sleep 1
 
+    # TODO: -dev Vulkan0 is hardcoded; auto-detect the RADV RENOIR index like
+    #       run/start-llama-server.sh does — the device order shifts whenever
+    #       discrete GPUs are added/removed.
+
     LD_LIBRARY_PATH="$REPO_DIR/llm/vulkan/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$REPO_DIR/llm/vulkan/bin/llama-server" \
         -m "$CURRENT_MODEL" \
@@ -340,6 +349,11 @@ run_bench() {
     local label="$1"
     local out_csv="$2"
     echo "  [bench] Running perf test for: $label"
+    # TODO: this inline python triplicates bench/test-server-perf.py and the
+    #       inline bench in bench/tune-rocm7-vega.sh — consolidate into one
+    #       parameterized script (URL, sizes, gen tokens, CSV out) used by all.
+    # TODO: also record model load time (time from server start to /health OK)
+    #       — it differs a lot between backends and is worth tracking.
 
     python3 - "$label" "$out_csv" "$SERVER_PORT" "${PROMPT_SIZES[@]}" <<'PYEOF'
 import sys, json, urllib.request, urllib.error, time

@@ -32,6 +32,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
+# TODO: PORT= only takes effect for the Vulkan/CPU/baremetal modes.
+#       run-docker-rocm7.sh hardcodes the -p 8080:8080 mapping, so with
+#       --rocm-docker a non-default PORT makes llama-server listen on $PORT
+#       *inside* the container while the host still forwards only 8080 —
+#       the endpoint silently breaks. Plumb PORT through the Docker launchers.
 MODEL="${MODEL:-$HOME/.lmstudio/models/lmstudio-community/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-Q4_K_M.gguf}"
 PORT="${PORT:-8080}"
 CTX="${CTX:-8192}"

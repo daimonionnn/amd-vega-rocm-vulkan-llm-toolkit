@@ -18,6 +18,8 @@
 set -euo pipefail
 
 # ─── Configuration ───
+# TODO: pin LLAMA_CPP_BRANCH to a tested tag/commit instead of tracking master
+#       (same reproducibility concern as build-llamacpp-rocm7-baremetal.sh).
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_BRANCH="master"
 BUILD_DIR="$(dirname "$0")/../llm/build"

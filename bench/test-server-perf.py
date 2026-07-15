@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# TODO: add argparse (--url / --sizes / --tokens) like test-lmstudio-perf.py —
+#       everything is hardcoded here, which is why the bench runners each carry
+#       their own inline copy of this logic instead of calling this script.
 import urllib.request
 import json
 import time

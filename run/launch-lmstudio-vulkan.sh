@@ -78,6 +78,9 @@ export HSA_OVERRIDE_GFX_VERSION=9.0.0
 #   GPU2 = AMD Radeon AI PRO R9700 (RADV GFX1201)
 # Force llama.cpp (inside LM Studio) to use the iGPU for Vulkan compute.
 # Verify with: llm/vulkan/bin/llama-server --list-devices
+# TODO: GGML_VK_DEVICE=0 is hardcoded — detect the RADV RENOIR index at launch
+#       (like run/start-llama-server.sh) since the order can shift when
+#       discrete GPUs are added/removed.
 export GGML_VK_DEVICE=0
 
 # Only expose the AMD RADV Vulkan driver (hide llvmpipe and any other ICDs).
@@ -291,6 +294,9 @@ echo "  ║  WARNING: Do NOT select ROCm — it will crash!       ║"
 echo "  ║  The ROCm binary has no gfx900/gfx90c kernels.     ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo ""
+# TODO: capacity hints below (and the "16 GB UMA" header comment) are stale —
+#       with the 64 GB GTT GRUB params even 35B MoE runs fully offloaded; sync
+#       these with the README "Model Capacity" table.
 echo "  With 16GB UMA + GTT, you can run:"
 echo "    • 3-4B Q4 models: full GPU offload (~2-3GB)"
 echo "    • 7-8B Q4 models: full GPU offload (~4-5GB)"

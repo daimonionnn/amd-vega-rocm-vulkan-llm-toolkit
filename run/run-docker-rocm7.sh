@@ -32,6 +32,10 @@ shift
 # Ryzen 5700G Vega 8 = PCI device ID 0x1638 (gfx90c). The render node number
 # moves when discrete GPUs change (renderD130 as of June 2026) — hence PCI-ID
 # detection. Override with VEGA8_RENDER_NODE=/dev/dri/renderDXXX if it fails.
+# TODO: this detection block is copy-pasted in run-docker-rocm.sh,
+#       bench/run-all-benchmarks.sh, bench/tune-rocm7-vega.sh and
+#       launch-lmstudio-vulkan.sh — extract into a shared sourced helper
+#       (e.g. run/lib-vega8-detect.sh) so a fix lands everywhere at once.
 VEGA8_PCI_ID="0x1638"
 VEGA8_RENDER_NODE="${VEGA8_RENDER_NODE:-}"
 
@@ -79,6 +83,8 @@ echo ""
 # shellcheck disable=SC2086
 # Use -it when stdin is a TTY (interactive), drop -t when piped/backgrounded
 [[ -t 0 ]] && TTY_FLAG="-it" || TTY_FLAG="-i"
+# TODO: honor PORT= (host mapping is hardcoded to -p 8080:8080; a --port flag
+#       passed by the caller only changes the port *inside* the container).
 docker run --rm $TTY_FLAG \
   --device=/dev/kfd \
   $EXTRA_DEVICES \

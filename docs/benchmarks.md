@@ -22,7 +22,9 @@ Compact benchmark log for llama.cpp on AMD Ryzen 7 5700G / Radeon Vega 8. Latest
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | BIOS UMA / iGPU VRAM         | **2 GB**                                                                                                             |
 | OS / kernel                  | Ubuntu 25.10, kernel 6.17                                                                                            |
-| CPU                          | AMD Ryzen 7 5700G, 8C/16T, Zen 3, AVX2/FMA                                                                           |
+| CPU                          | AMD Ryzen 7 5700G, 8C/16T, Zen 3, AVX2/FMA — slight undervolt: Curve Optimizer all-core offset −10                   |
+| RAM                          | 64 GB DDR4 — 2× 32 GB Kingston Fury 3600 MT/s overclocked to **4200 MT/s** (UMA-shared with the iGPU; decode is memory-bandwidth-bound, so slower RAM ⇒ proportionally slower decode) |
+| Motherboard                  | ASRock Fatal1ty B450 Gaming-ITX/ac                                                                                   |
 | Target GPU                   | Radeon Vega 8 iGPU, gfx90c/gfx900-compatible (`/dev/dri/renderD129` at run time; `renderD130` as of June 2026)       |
 | Other GPUs                   | RX 9700 AI Pro present but not used by benchmark scripts (June 2026: 2× R9700, RTX 5090 removed)        |
 | Context                      | `-c 8192`                                                                                                            |

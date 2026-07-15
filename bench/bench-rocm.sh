@@ -20,6 +20,11 @@ fi
 
 # Apply the same safe ROCm env as the run/ scripts:
 # SDMA off (unreliable on integrated Vega), XNACK off (=1 freezes the PC).
+# TODO: no device selection — on the multi-GPU host, agent 0 is an R9700, so
+#       this would bench the wrong GPU (or crash: the gfx900 build can't run
+#       on gfx1201). Auto-detect the Vega 8 agent index like
+#       run/run-rocm7-baremetal.sh and set ROCR_VISIBLE_DEVICES=<idx>
+#       HIP_VISIBLE_DEVICES=0 before benching.
 export HSA_OVERRIDE_GFX_VERSION=9.0.0
 export HSA_ENABLE_SDMA=0
 export HSA_XNACK=0

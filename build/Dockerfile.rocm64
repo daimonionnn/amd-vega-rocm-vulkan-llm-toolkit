@@ -6,6 +6,10 @@ RUN apt-get update -qq && \
       hipblas-dev rocblas-dev rocsolver-dev numactl && \
     rm -rf /var/lib/apt/lists/*
 
+# TODO: pin to a tested commit (ARG LLAMA_CPP_REF) — cloning master makes image
+#       builds non-reproducible; the sed-based FP8 patch below is also fragile
+#       against upstream changes to vendors/hip.h and should fail the build
+#       loudly if it no longer matches.
 WORKDIR /app
 RUN git clone https://github.com/ggml-org/llama.cpp.git .
 
