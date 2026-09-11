@@ -92,6 +92,44 @@ when you need gradients.
 `torch 2.7.0+rocm6.3` has no such fault and needs neither the injection nor the
 switch. Prefer it unless you need something from a newer PyTorch.
 
+### What 2.11 actually brings over 2.7 — on this hardware, very little
+
+Checked against the release notes for 2.8, 2.9, 2.10 and 2.11 (April 2025 to
+March 2026).
+
+**The headline features mostly target other hardware.** FlexAttention's
+FlashAttention-4 backend is Hopper/Blackwell only; FlexAttention and FP8 work is
+Intel XPU; the operator expansion is Apple MPS; differentiable collectives are for
+multi-GPU training. None of it helps an 8-CU gfx900 — and on this target PyTorch
+cannot use flash or memory-efficient attention at all.
+
+**What reaches AMD** is mostly plumbing: builds against ROCm 7.0, 7.1 and 7.2,
+`torch.version.rocm` distinct from `torch.version.hip`, improved pointwise-kernel
+heuristics on ROCm, and a run of MIOpen fixes — batchnorm no longer changes
+output memory format, convolutions no longer reshape unexpectedly, and MIOpen now
+backs CTC loss.
+
+**ComfyUI gains nothing version-gated.** Its code checks the torch version in two
+places that matter here:
+
+| Gate | Enables | On this hardware |
+| --- | --- | --- |
+| `>= 2.10` | mxfp8 compute | off anyway — the function returns `False` unless `is_nvidia()` |
+| `>= 2.7` | extended fp16 support | already on with 2.7.0 |
+
+**So the real reasons to upgrade are indirect:** a library that starts requiring a
+newer PyTorch, and the security fixes that 2.9 onward list in their release notes.
+Neither applies today. Stay on 2.7.0 until one does.
+
+**One lead worth following if you do need 2.11 for training.** 2.9 added
+`torch.backends.miopen.immediate`, which switches MIOpen to Immediate Mode — a
+different algorithm-selection path from the find mode that picks the faulting
+backward algorithm. It might avoid the fault while keeping MIOpen, instead of
+paying ~3× for `cudnn.enabled = False`. Untested; 2.11 also made MIOpen
+channels-last opt-in again (`PYTORCH_MIOPEN_SUGGEST_NHWC=1`), which touches the
+same code. Try it the way the fault was isolated here — traced to disk, one step
+per process — because the failure mode can be a host freeze.
+
 ### After a GPU hang, reboot — a driver reset is not enough
 
 This cost four wasted test runs and is worth knowing before you debug anything
