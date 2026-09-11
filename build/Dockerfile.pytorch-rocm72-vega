@@ -1,0 +1,45 @@
+# EXPERIMENT: can a newer PyTorch be made to work on gfx900?
+#
+# torch 2.7.0+rocm6.3 is the last stock wheel shipping gfx900 kernels (128 files
+# in torch/lib/rocblas/library/). Every wheel after it — 6.4, 7.0, 7.1, 7.2 —
+# ships zero. This image tests whether injecting those kernels into a newer
+# wheel is enough, the same trick this repo uses for llama.cpp.
+#
+# The gate is whether PyTorch's own ATen kernels were compiled for gfx900. If
+# they were not, injecting rocBLAS files achieves nothing and this image will
+# fail at the first GPU op. That cannot be settled by inspecting the library —
+# attempted and it produces false negatives — so it is settled by running.
+#
+# Source of the kernels: ROCm 6.3.4, the same place build/Dockerfile.rocm7-vega
+# takes them from. Those files are known to work with a 7.2-era rocBLAS: that is
+# exactly what the host install does.
+FROM rocm/dev-ubuntu-22.04:6.3.4 AS rocm6-libs
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 libnuma1 && rm -rf /var/lib/apt/lists/*
+
+ARG TORCH_VERSION=2.11.0+rocm7.2
+ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2
+RUN pip install --no-cache-dir --index-url "${TORCH_INDEX}" "torch==${TORCH_VERSION}" && \
+    pip install --no-cache-dir numpy
+
+COPY --from=rocm6-libs /opt/rocm/lib/rocblas/library/ /tmp/rocm6-rocblas/
+RUN set -eux; \
+    TL="$(python3 -c 'import torch,os;print(os.path.join(os.path.dirname(torch.__file__),"lib","rocblas","library"))')"; \
+    echo "target: $TL"; \
+    before="$(ls "$TL" | grep -c gfx900 || true)"; \
+    find /tmp/rocm6-rocblas -name '*gfx900*' -exec cp {} "$TL/" \; ; \
+    after="$(ls "$TL" | grep -c gfx900 || true)"; \
+    echo "gfx900 files: $before -> $after"; \
+    test "$after" -gt 0; \
+    rm -rf /tmp/rocm6-rocblas
+
+ENV HSA_OVERRIDE_GFX_VERSION=9.0.0 \
+    HSA_ENABLE_SDMA=0 \
+    HSA_XNACK=0
+
+COPY build/pytorch-verify.py /opt/pytorch-verify.py
+COPY build/pytorch-smoke.py /opt/pytorch-smoke.py
+ENTRYPOINT ["python3", "/opt/pytorch-smoke.py"]

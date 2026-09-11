@@ -170,17 +170,47 @@ Two caveats to that:
 - Bandwidth is shared DDR4, about 50 GB/s against ~450 GB/s for an HBM2 card.
   Anything bandwidth-bound will feel that.
 
+## How fast is it, really — against this machine's own CPU
+
+Measured 2026-09-11
+([full results](../bench/results/2026-09-11-pytorch-cpu-vs-apu.md)):
+
+| Workload | CPU (8 threads) | APU | Ratio |
+| --- | ---: | ---: | ---: |
+| sgemm fp32 4096³ | 699 GF | **1959 GF** | 2.8× |
+| sgemm fp16 4096³ | 0.4 GF | **2338 GF** | 5839× |
+| conv2d 16×64×128×128 | 96.2 ms | **14.9 ms** | 6.4× |
+| **attention 4×12×1024×64** | **20.0 ms** | 50.7 ms | **0.40×** |
+
+**The fp32 gap is only about 3×** — this CPU reaches ~700 GFLOP/s, so the iGPU
+is a useful speedup rather than a different league. **fp16 on the CPU is
+unusable** (no optimised path; use fp32 or bf16 there), while the APU reaches
+2338 GF. **Convolution is the APU's best case at 6.4×**, which is encouraging
+for image work.
+
+**Attention is 2.5× faster on the CPU**, and that one deserves care. On gfx900
+PyTorch has only the `MATH` attention backend — both `FLASH` and
+`MEM_EFFICIENT` report "No available kernel" — so it materialises the full
+`seq × seq` matrix instead of avoiding it. Transformer work here will be
+attention-bound, increasingly so with sequence length. This is PyTorch's
+limitation, not the hardware's: llama.cpp has its own flash-attention kernels,
+and [`patches/0001`](../patches/README.md) makes them work well on this exact
+silicon.
+
 ## ComfyUI and Stable Diffusion
 
 **Not yet tested here** — this section is what the measurements imply, not
 results.
 
-The compute path is proven: MIOpen convolutions produce correct results, which
-is the operation diffusion models spend most of their time in. So support is not
-the question; speed is. At 1.40 TFLOP/s fp32 and ~50 GB/s of shared bandwidth,
-expect this to be usable for experimentation rather than production — SD1.5 at
-512×512 should fit comfortably in memory, and SDXL will fit where it would not
-on an 8 GB card, but neither will be quick.
+The compute path is proven and the measurements are mildly encouraging.
+Convolution is the APU's strongest case — 6.4× the CPU — and diffusion models
+spend most of their time there. Memory is not the constraint it is on an 8 GB
+card, so SDXL should fit where it otherwise would not.
+
+The caution is attention. SDXL's transformer blocks will hit the `MATH`
+fallback described above, and that cost grows with resolution. Expect this to be
+usable for experimentation rather than production, and expect the gap between
+SD1.5 and SDXL to be wider here than on supported hardware.
 
 If you try it, the image above is a working PyTorch base to build on. Reporting
 real numbers back would be welcome.
