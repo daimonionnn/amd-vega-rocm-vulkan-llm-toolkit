@@ -71,7 +71,10 @@ the GPU access an invalid address:
 Memory access fault by GPU node-1 on address 0x7ab6d7023000
 ```
 
-— and it froze the host twice before being isolated. Which shapes fail depends
+— and it froze the host three times: twice with the iGPU overclocked to 2400 MHz
+before the fault was isolated, once at 2300 MHz during a cost measurement. It was
+isolated at 2300 MHz and has deliberately not been re-run at the stock clock.
+Which shapes fail depends
 on the algorithm MIOpen selects, not on stride: a small stride-2 conv faulted,
 and so, it appears, did a larger stride-1 one. Disabling MIOpen's tuning
 database does not help.
@@ -314,8 +317,11 @@ real numbers back would be welcome.
 
 ## What has not been tried
 
-- ComfyUI, Stable Diffusion, vLLM, or any training workload
-- fp16/bf16 throughput beyond the smoke test's single matmul
+- ComfyUI, Stable Diffusion, vLLM
+- A real training loop — a single backward step is verified correct, but no
+  model has been trained end to end
+- bf16 throughput (correctness is verified; fp16 matmul throughput is measured
+  in [the CPU vs APU results](../bench/results/2026-09-11-pytorch-cpu-vs-apu.md))
 - `torch.compile` / Triton on this target
 - Multi-process or multi-GPU anything
 - INT8 paths needing hipBLASLt — confirmed unavailable, see above

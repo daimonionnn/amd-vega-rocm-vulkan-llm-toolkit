@@ -66,10 +66,10 @@ Each backward component run in its own process ([`isolate.py`](isolate.py),
 
 That first read as "stride 2". It is not. A later cost measurement ran MIOpen's
 backward on a **stride-1** conv at a larger size (64→128, 16×64×64) and **froze
-the host** — with the hardware at stock clocks by then, so unambiguously
-software. The script had no trace, so it is not proven that the freeze was the
-backward rather than the forward; but MIOpen forward at that exact size was
-re-run afterwards and works, which leaves the backward. The trigger is **which
+the host**, with the iGPU still overclocked to 2300 MHz; the overclock was removed
+only after this freeze. The script had no trace, so it is not proven that the
+freeze was the backward rather than the forward; but MIOpen forward at that exact
+size was re-run afterwards, at stock clock, and works, which leaves the backward. The trigger is **which
 algorithm MIOpen selects**, and that depends on shape and size, not stride.
 
 The obvious suspect — the `gfx900_56.db.txt` tuning database shipped in this
@@ -124,8 +124,23 @@ works — confirming the fault is specific algorithm selections, not MIOpen's
 backward paths as a whole. It is also what VAE decoders in diffusion pipelines
 use.
 
-### Hardware state for all of the above
+### Hardware state, and what that does and does not establish
 
-The iGPU overclock and CPU Curve Optimizer were disabled before the sweep and
-cost measurement; the iGPU was confirmed at its stock **2000 MHz** under load via
-`pp_dpm_sclk`. Every fault recorded after that point is software.
+| Run | iGPU clock | Outcome |
+| --- | --- | --- |
+| Full verification, twice | 2400 MHz | host froze, no trace |
+| Traced verification, isolation, fix tests | 2300 MHz | memory access fault in conv backward, host fine |
+| Original cost measurement | 2300 MHz | host froze |
+| Safe cost measurement, 20-op sweep, CPU vs APU | **2000 MHz stock** | all pass |
+
+The iGPU overclock and CPU Curve Optimizer were removed **after** the third
+freeze, and the stock 2000 MHz clock confirmed under load via `pp_dpm_sclk`.
+
+**The conv-backward fault has not been reproduced at stock clock** — it was
+deliberately not run again, since its failure mode is a host freeze. The case
+that it is software rests on its character, not on the hardware state: a memory
+access fault at the same operation, isolated to one component, with the forward
+pass of that same component working at the same size. Overclock instability does
+not produce that. An earlier version of this page claimed the third freeze
+happened at stock clock and was therefore unambiguously software; that was wrong
+about the order of events.

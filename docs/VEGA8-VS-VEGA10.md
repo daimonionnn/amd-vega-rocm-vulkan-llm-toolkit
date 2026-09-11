@@ -56,10 +56,15 @@ if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
 
 A discrete GPU reports `HSA_PROFILE_BASE`. An APU with coherent integrated memory
 reports `HSA_PROFILE_FULL` and takes the other branch. So a dGPU and an APU do
-**not execute the same code** in the runtime's DMA initialisation — which is
-exactly where the ROCm 7.14 SDK crashes here while a V340 runs 7.14-era packages
-fine. See
-[the crash write-up](../bench/results/2026-09-11-rocm714-sdk-gfx900.md).
+**not execute the same code** in the runtime's DMA initialisation.
+
+That looked like the explanation for AMD's ROCm 7.14 wheels segfaulting in
+exactly that function on this APU while a V340 runs 7.14-era packages fine. **It
+is not.** A second ROCm 7.14 build — `mixa3607/rocm-gfx906:7.14-complete` — runs on
+this same APU, through this same `HSA_PROFILE_FULL` branch, without a problem. So
+the crash belongs to AMD's wheel build, not to the APU code path. See
+[the crash write-up](../bench/results/2026-09-11-rocm714-sdk-gfx900.md) and
+[the working 7.14 build](../bench/results/2026-09-11-rocm714-working.md).
 
 **Practical consequence:** "it works on a discrete Vega" is not evidence that it
 works on this APU, and vice versa. They diverge inside ROCm itself.
@@ -105,6 +110,10 @@ reached through the override. That gap is widening:
   hipTensor, rocprofiler-compute), so they can be built even though they are not
   shipped.
 - `torch 2.7.0+rocm6.3` is the last stock PyTorch wheel carrying gfx900 kernels.
+- **But ROCm 7.14 does run here** — mixa3607's TheRock build plus the gfx900
+  Tensile files lifted out of AMD's own (unusable) wheel, verified with
+  `test-backend-ops` 2959/2959. The support gap is a packaging gap more than a
+  capability one.
 
 **Practical consequence:** a discrete Vega10 owner can sometimes use an official
 package as-is. On gfx90c there is always a substitution step.
@@ -129,9 +138,9 @@ here that would not transfer:
 - Whether `patches/0001` helps as much on a discrete Vega10. This APU is
   memory-bound in a way HBM2 parts are not, so the balance will differ. Raised in
   issue #1; no data yet.
-- Whether the ROCm 7.14 `InitDma` crash is the `HSA_PROFILE_FULL` branch, a build
-  or ABI mismatch, or both. The evidence points at a corrupt `std::function`
-  manager pointer, which suggests layout rather than logic.
+- ~~Whether the ROCm 7.14 `InitDma` crash is the `HSA_PROFILE_FULL` branch or a
+  build mismatch.~~ **Settled: the build.** Another 7.14 build runs on this APU
+  through the same branch. The corrupt `std::function` manager pointer fits that.
 - Whether gfx906 (Radeon VII / MI50 / MI60) behaves like gfx900 for these purposes.
   It is a separate TheRock family with its own exclusions, and
   [mixa3607/ML-gfx906](https://github.com/mixa3607/ML-gfx906) treats it separately.

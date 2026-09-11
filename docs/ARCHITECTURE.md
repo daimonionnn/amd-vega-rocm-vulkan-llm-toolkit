@@ -202,6 +202,13 @@ first. It does suggest the modular runtime is not fundamentally hostile to gfx9 
 gfx900 kernels fine — which moves suspicion onto the override rejection as a separate
 cause, but that is a hypothesis and testing it would mean dismantling a working install.
 
+> **Update 2026-09-11:** no dismantling needed after all. ROCm 7.14 runs on this APU
+> in a container — `mixa3607/rocm-gfx906:7.14-complete` for the runtime, plus the
+> gfx900 Tensile files out of AMD's gfx900 wheels — and llama.cpp built against it
+> passes `test-backend-ops` 2959/2959. AMD's own 7.14 wheels segfault here, which is
+> a build problem specific to them. See
+> [the working build](../bench/results/2026-09-11-rocm714-working.md).
+
 ## Performance ceiling and tuning levers (gfx900 / Vega 8)
 
 Two hardware facts bound what any amount of build/flag tuning can achieve on this iGPU:

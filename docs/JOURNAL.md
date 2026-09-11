@@ -171,20 +171,64 @@ wheel bundles its own gfx900 rocBLAS, rocRAND and MIOpen, so the override is the
 whole trick. rocRAND, which had been named as the blocker, was never one on this
 path.
 
-### A dead end worth recording
+### A dead end that was not one
 
 AMD publishes a complete ROCm 7.14 built for gfx900 as pip wheels, which looked
-like it could retire the backport entirely. llama.cpp builds against it cleanly.
-The runtime segfaults during GPU enumeration on this APU — with and without the
-override — so it is the same wall as June 2026, failing less gracefully. The
-backport stays. Written up in
-[bench/results/2026-09-11-rocm714-sdk-gfx900.md](../bench/results/2026-09-11-rocm714-sdk-gfx900.md).
+like it could retire the backport entirely. llama.cpp builds against it cleanly,
+but the runtime segfaults inside `hsa_init()` — in `GpuAgent::InitDma()`, while
+destroying a `std::function` whose manager pointer reads `0x100000001` — with and
+without the override. Written up as the same wall as June 2026, and the backport
+declared staying.
+
+That conclusion lasted about a morning. Josephur's V340 ran "modular 7.14"
+packages, which turned out to be mixa3607's TheRock build rather than anything
+from AMD, so the obvious next test was that image on this APU. **It works.** Same
+ROCm version, same build system, different builder — so the crash belonged to
+AMD's wheels, not to 7.14. A working 7.14 then assembles from parts: mixa3607's
+runtime plus the 182 gfx900 Tensile files lifted out of AMD's unusable wheel.
+`test-backend-ops` passes 2959/2959, and a 12-cell matrix against ROCm 7.2 is
+within noise on 11. The exception, gemma decode about 8 % slower, survives
+`-fa 0` — so it is not `patches/0001`, which was the obvious suspect since it is
+inline assembly. The backport into 7.2 stays the default on speed, but it is no
+longer the only road. [Crash](../bench/results/2026-09-11-rocm714-sdk-gfx900.md),
+[working build](../bench/results/2026-09-11-rocm714-working.md).
+
+### A newer PyTorch, three host freezes, and one bad fault
+
+Injecting the 128 gfx900 rocBLAS files into `torch 2.11.0+rocm7.2` makes it start,
+and a 20-op sweep later showed almost all of it correct. Getting there froze the
+whole machine three times.
+
+The first two freezes, with the iGPU overclocked to 2400 MHz, lost every line of
+output — container logs and page cache do not survive a hard lockup. The user
+understandably blamed the overclock and began removing it. The third attempt, at
+the user's request and risk, logged each step to disk with `fsync` **before**
+running it. At 2300 MHz it did not freeze: the autograd backward pass died with
+`Memory access fault by GPU`. Isolating component by component narrowed it to
+**MIOpen's convolution backward**, for some shapes — not stride as such, and not a
+tuning database shipped for a 56-CU Vega 56. Forward is fine, so inference needs
+nothing and training needs `torch.backends.cudnn.enabled = False`, at about 3× on
+convolutions. [Evidence](../bench/results/torch211-trace/README.md).
+
+Two further lessons fell out, both worth more than the PyTorch result.
+
+**After a GPU hang on this APU, reboot.** The kernel reports "recovered through
+reset". It has not: every later GPU job hung, including torch 2.7.0 on operations
+it had passed an hour earlier, until a reboot. Four test runs were spent
+measuring the broken state before that was understood — and one of them was
+briefly read as proof that the *good* version was faulty too.
+
+**Freezes on one workload are evidence about that workload.** All three freezes
+came from the same experimental stack while the stable ones survived identical
+loads, and the fault, once caught, was deterministic. The overclock was not the
+cause — though it did make the same fault freeze the host at 2400 MHz where it
+only killed a process at 2300.
 
 ---
 
 ## What kept going wrong
 
-Four patterns account for nearly every correction above. They are worth more
+Five patterns account for nearly every correction above. They are worth more
 than the chronology.
 
 ### 1. Silent fallback to the CPU, by three different routes
@@ -221,6 +265,22 @@ interesting one — using a figure that belonged to a different backend's phase.
 
 **The lesson:** if several things moved, the honest write-up is "unexplained".
 That entry is still open in the TODO, and it should be.
+
+The same failure recurred in September in a quieter form. A PyTorch host freeze
+was written up as "unambiguously software because the hardware was at stock clock
+by then" — but the overclock had been removed *after* that freeze, not before it.
+The conclusion survived, on other evidence; the stated reason did not. Getting
+the order of events wrong is attribution without isolation too.
+
+### 5. Measuring the damage instead of the software
+
+After one GPU hang, four more tests were run against a GPU the driver had reset
+but not restored. Each looked like a result, and one briefly suggested the
+known-good PyTorch was broken as well.
+
+**The lesson:** when a result is surprising, check that the instrument still
+works before believing the measurement. Here that means a reboot and a known-good
+control as the first job, before anything else.
 
 ### And one that worked
 
