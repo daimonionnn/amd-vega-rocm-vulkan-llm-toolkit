@@ -1,0 +1,30 @@
+# ROCm 7.2 (6.3.4 backport) vs ROCm 7.14 (mixa3607 runtime + AMD gfx900 kernels).
+# Both carry patches/0001. llama-bench -ngl 99 -fa 1 -b 4096 -ub 4096 -r 1, 2026-09-11.
+# Each cell measures both builds back to back, then cools, so neither gets a
+# thermal advantage. -r 1: single repeat, so treat differences under ~3% as noise.
+model	metric	context	rocm_7_2	rocm_7_14	delta_pct
+gemma	prefill	4096	248.51	246.28	-0.9
+gemma	prefill	16384	201.84	200.04	-0.9
+gemma	prefill	32768	173.66	172.21	-0.8
+gemma	decode	4096	14.50	13.15	-9.3
+gemma	decode	16384	13.19	12.04	-8.7
+gemma	decode	32768	11.81	10.91	-7.6
+35B	prefill	4096	148.51	151.32	+1.9
+35B	prefill	16384	128.16	128.63	+0.4
+35B	prefill	32768	111.38	112.78	+1.3
+35B	decode	4096	18.67	18.50	-0.9
+35B	decode	16384	17.41	16.93	-2.8
+35B	decode	32768	15.84	15.72	-0.8
+#
+# Discriminating test, gemma decode @16384, -r 2 on both builds back to back:
+#   -fa 1:  7.2 = 13.62   7.14 = 12.43   -8.7 %
+#   -fa 0:  7.2 =  9.29   7.14 =  8.56   -7.9 %
+# The gap survives -fa 0, where flash attention and patches/0001 are not used at
+# all. So the regression is NOT the patch's inline asm compiled by a different
+# LLVM -- that hypothesis is refuted.
+#
+# What remains: decode at batch 1 does not go through rocBLAS; it runs
+# llama.cpp's own GEMV kernels (mmvf/mmvq). Both builds compile the same source
+# with different compilers. A dense model and an MoE take different kernels
+# there (MoE uses mul_mat_id), which is consistent with gemma losing ~8% while
+# the 35B does not.
