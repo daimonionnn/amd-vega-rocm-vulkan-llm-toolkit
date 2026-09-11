@@ -1,0 +1,69 @@
+# llama.cpp on ROCm 7.14 for gfx900 — a working runtime plus AMD's gfx900 kernels.
+#
+# Background. AMD publishes ROCm 7.14 wheels built for gfx900, and their
+# rocBLAS carries a complete set of 182 gfx900 Tensile files. But that build's
+# ROCr segfaults in GpuAgent::InitDma() during hsa_init() on this gfx90c APU, so
+# the wheels are unusable here — see
+# bench/results/2026-09-11-rocm714-sdk-gfx900.md.
+#
+# mixa3607/rocm-gfx906 is also ROCm 7.14, also built with TheRock, but built by
+# someone else with different configuration. Its ROCr enumerates this APU
+# perfectly (rocminfo reports gfx900:xnack- and exits 0), which is what proves
+# the crash is a property of AMD's wheel build rather than of the 7.14 source.
+#
+# So: take their runtime, and take AMD's gfx900 kernels. Their rocBLAS ships
+# gfx906 only, but both use the same per-architecture layout
+# (lib/rocblas/library/<arch>/), so the gfx900 directory drops straight in.
+#
+# Note this is NOT the ROCm 6.3.4 backport used elsewhere in this repo: these
+# kernels are built for 7.14 by AMD. The 6.3.4 files do not work here — the
+# Tensile format changed between 7.2 and 7.14.
+
+# ── Stage 1: lift the gfx900 Tensile kernels out of AMD's wheel ───────────────
+FROM python:3.12-slim AS kernels
+ARG ROCM_SDK_INDEX=https://rocm.nightlies.amd.com/v2/gfx900/
+ARG ROCM_SDK_VERSION=7.14.0a20260612
+RUN pip install --no-cache-dir --index-url "${ROCM_SDK_INDEX}" \
+        "rocm-sdk-libraries-gfx900==${ROCM_SDK_VERSION}" && \
+    cp -r /usr/local/lib/python3.12/site-packages/_rocm_sdk_libraries_gfx900/lib/rocblas/library/gfx900 \
+          /gfx900 && \
+    ls /gfx900 | wc -l
+
+# ── Stage 2: build llama.cpp against the working 7.14 runtime ────────────────
+FROM mixa3607/rocm-gfx906:7.14-complete
+
+COPY --from=kernels /gfx900 /opt/rocm/lib/rocblas/library/gfx900
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake ninja-build build-essential libcurl4-openssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+ARG LLAMA_CPP_REF=465e49b9cea78a68b9c244ffb48d0ee24a82873d
+RUN git init -q . && \
+    git remote add origin https://github.com/ggml-org/llama.cpp.git && \
+    git fetch --depth 1 origin "$LLAMA_CPP_REF" && \
+    git checkout --detach FETCH_HEAD && \
+    git rev-parse --short HEAD
+
+COPY patches/ /tmp/repo/patches/
+COPY build/apply-patches.sh /tmp/repo/build/apply-patches.sh
+RUN bash -c '. /tmp/repo/build/apply-patches.sh' && git diff --stat
+
+RUN cmake -B build -G Ninja \
+      -DGGML_HIP=ON \
+      -DGPU_TARGETS=gfx900 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_HIP_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DGGML_HIP_GRAPHS=OFF \
+      -DGGML_BACKEND_DL=ON \
+      -DGGML_CPU_ALL_VARIANTS=ON \
+      -DLLAMA_BUILD_SERVER=ON \
+      -DLLAMA_CURL=OFF && \
+    cmake --build build --config Release -j"$(nproc)"
+
+ENV HSA_OVERRIDE_GFX_VERSION=9.0.0 \
+    HSA_ENABLE_SDMA=0 \
+    HSA_XNACK=0 \
+    GPU_MAX_ALLOC_PERCENT=100
+ENTRYPOINT ["/app/build/bin/llama-bench"]

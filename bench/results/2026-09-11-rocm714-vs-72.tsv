@@ -1,0 +1,7 @@
+# ROCm 7.14 (mixa3607 runtime + AMD gfx900 kernels) vs ROCm 7.2 (6.3.4 Tensile backport).
+# Both carry patches/0001. llama-bench -ngl 99 -fa 1 -b 4096 -ub 4096 -r 1, 2026-09-11.
+model	rocm	metric	context	t_per_s
+gemma	7.14	prefill	16384	199.56
+gemma	7.14	decode	16384	12.08
+35B	7.14	prefill	4096	149.32
+35B	7.14	decode	16384	17.13

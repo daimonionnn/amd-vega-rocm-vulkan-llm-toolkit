@@ -1,5 +1,16 @@
 # DRAFT — not filed
 
+> **Rewrite needed before sending (2026-09-11).** A second ROCm 7.14 build of the
+> same source — `mixa3607/rocm-gfx906:7.14-complete`, also built with TheRock —
+> enumerates this APU without any problem. So the claim is no longer "ROCm 7.14
+> crashes on gfx90c" but "**AMD's 7.14 gfx900 wheel build crashes where another
+> 7.14 build does not**". That is narrower, more actionable, and points at
+> packaging or build configuration rather than at ROCr's logic — which also
+> fits the corrupt-`std::function` evidence better than a source bug would.
+> It also strengthens the case for filing: a build-configuration difference is
+> something TheRock can act on, unlike a defect on a dropped architecture.
+> See [the working build](../../bench/results/2026-09-11-rocm714-working.md).
+
 Bug report prepared 2026-09-11, **not submitted**. Review before sending.
 
 **Where to file:** [ROCm/TheRock](https://github.com/ROCm/TheRock/issues) is the
