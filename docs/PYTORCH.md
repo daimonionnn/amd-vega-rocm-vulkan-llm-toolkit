@@ -86,7 +86,8 @@ So:
 The workaround makes PyTorch use its native convolution instead of MIOpen, and
 with it the full verification passes 9/9 including the backward pass. The cost
 is real — conv forward goes from 5.75 ms to 15.51 ms at 64→128 channels,
-16×64×64 — which is why it is worth applying only when you need gradients.
+16×64×64, measured at the stock 2000 MHz — which is why it is worth applying only
+when you need gradients.
 
 `torch 2.7.0+rocm6.3` has no such fault and needs neither the injection nor the
 switch. Prefer it unless you need something from a newer PyTorch.
@@ -149,6 +150,10 @@ device: AMD Radeon Graphics  arch=gfx900:xnack-  CUs=8  mem=64.0 GiB
   fp32 sgemm 2048^3: 12.2 ms/iter = 1.40 TFLOP/s
 ```
 
+That throughput line was recorded with the iGPU overclocked to 2400 MHz. At the
+stock 2000 MHz the same matmul gives about **1.19 TFLOP/s**; correctness is
+unaffected by the clock.
+
 ### Beyond the libraries: does a real network compute correctly?
 
 [`build/pytorch-verify.py`](../build/pytorch-verify.py) answers the harder
@@ -197,8 +202,10 @@ been a hard blocker.
 
 ## What to expect from the hardware
 
-**1.40 TFLOP/s fp32**, roughly 57 % of this iGPU's theoretical peak
-(8 CU × 64 lanes × 2 flop × 2.4 GHz = 2.46 TFLOP/s). For scale, a discrete
+**About 1.19 TFLOP/s fp32 at the stock 2000 MHz** (1.40 overclocked to 2400),
+roughly 58 % of this iGPU's theoretical peak at that clock
+(8 CU × 64 lanes × 2 flop × 2.0 GHz = 2.05 TFLOP/s). Larger matrices do better —
+4096³ reaches 83 %. For scale, a discrete
 Radeon Pro V340 die was reported at ~7 TFLOP/s in issue #1, and a modern dGPU is
 another order beyond that.
 
@@ -220,23 +227,27 @@ Two caveats to that:
 
 ## How fast is it, really — against this machine's own CPU
 
-Measured 2026-09-11
-([full results](../bench/results/2026-09-11-pytorch-cpu-vs-apu.md)):
+Measured 2026-09-11 at the **stock 2000 MHz** iGPU clock
+([full results](../bench/results/2026-09-11-pytorch-cpu-vs-apu.md), which also
+has the 2400 MHz overclocked figures):
 
 | Workload | CPU (8 threads) | APU | Ratio |
 | --- | ---: | ---: | ---: |
-| sgemm fp32 4096³ | 699 GF | **1959 GF** | 2.8× |
-| sgemm fp16 4096³ | 0.4 GF | **2338 GF** | 5839× |
-| conv2d 16×64×128×128 | 96.2 ms | **14.9 ms** | 6.4× |
-| **attention 4×12×1024×64** | **20.0 ms** | 50.7 ms | **0.40×** |
+| sgemm fp32 4096³ | 677 GF | **1694 GF** | 2.5× |
+| sgemm fp16 4096³ | 0.4 GF | **1994 GF** | — |
+| conv2d 16×64×128×128 | 90.0 ms | **17.9 ms** | 5.0× |
+| **attention 4×12×1024×64** | **20.2 ms** | 56.3 ms | **0.36×** |
 
-**The fp32 gap is only about 3×** — this CPU reaches ~700 GFLOP/s, so the iGPU
+Overclocking the iGPU to 2400 MHz is worth about 17 % on convolution, 13–15 % on
+matmul and only 10 % on attention, which is memory-bound.
+
+**The fp32 gap is only about 2.5×** — this CPU reaches ~700 GFLOP/s, so the iGPU
 is a useful speedup rather than a different league. **fp16 on the CPU is
 unusable** (no optimised path; use fp32 or bf16 there), while the APU reaches
-2338 GF. **Convolution is the APU's best case at 6.4×**, which is encouraging
+1994 GF. **Convolution is the APU's best case at 5×**, which is encouraging
 for image work.
 
-**Attention is 2.5× faster on the CPU**, and that one deserves care. On gfx900
+**Attention is nearly 3× faster on the CPU**, and that one deserves care. On gfx900
 PyTorch has only the `MATH` attention backend — both `FLASH` and
 `MEM_EFFICIENT` report "No available kernel" — so it materialises the full
 `seq × seq` matrix instead of avoiding it. Transformer work here will be
@@ -251,8 +262,8 @@ silicon.
 results.
 
 The compute path is proven and the measurements are mildly encouraging.
-Convolution is the APU's strongest case — 6.4× the CPU — and diffusion models
-spend most of their time there. Memory is not the constraint it is on an 8 GB
+Convolution is the APU's strongest case — 5× the CPU at stock clock — and
+diffusion models spend most of their time there. Memory is not the constraint it is on an 8 GB
 card, so SDXL should fit where it otherwise would not.
 
 The caution is attention. SDXL's transformer blocks will hit the `MATH`
