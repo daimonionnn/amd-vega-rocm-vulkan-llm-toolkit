@@ -45,6 +45,10 @@ for f in md:
         p = os.path.normpath(os.path.join(base, tgt))
         if not os.path.exists(p):
             bad.append(f"{f} -> {tgt}  (path does not exist)")
+        # On this disk but git-ignored: resolves locally, missing on GitHub and in
+        # CI. Checking existence alone let seven such links pass here for a day.
+        elif subprocess.run(["git", "check-ignore", "-q", p]).returncode == 0:
+            bad.append(f"{f} -> {tgt}  (git-ignored, so never published)")
 
 for b in bad:
     print(f"::error::broken link: {b}")

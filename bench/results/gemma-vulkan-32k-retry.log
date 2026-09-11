@@ -1,0 +1,58 @@
+=== pokus po zmene BIOS: gemma / Vulkan / 32k prefill / -ub 2048 / -fa 1 ===
+BIOS: iGPU max 2200 MHz (bolo 2400), iGPU CO vypnuty, CPU boost -100 MHz, CPU CO -11
+ring resetov pred: 0
+teplota: 36C
+cas startu: 06:19:42
+--- spustam ---
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon Graphics (RADV RENOIR) (radv) | uma: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 64 | shared memory: 65536 | int dot: 0 | matrix cores: none
+load_backend: loaded Vulkan backend from <repo>/llm/vulkan/bin/libggml-vulkan.so
+load_backend: loaded CPU backend from <repo>/llm/vulkan/bin/libggml-cpu-haswell.so
+radv/amdgpu: The CS has been cancelled because the context is lost. This context is innocent.
+⚠️ warning: The current terminal doesn't support styling.  Styled output might not appear as expected.
+[New LWP 7849]
+[New LWP 7848]
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+⚠️ warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+56	in ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S
+#1  0x0000752e2b0a061c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=61) at ./nptl/cancellation.c:49
+⚠️ warning: 49	./nptl/cancellation.c: No such file or directory
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=61) at ./nptl/cancellation.c:75
+75	in ./nptl/cancellation.c
+#3  0x0000752e2b11cd4f in __GI___wait4 (pid=<optimized out>, stat_loc=<optimized out>, options=<optimized out>, usage=<optimized out>) at ../sysdeps/unix/sysv/linux/wait4.c:30
+⚠️ warning: 30	../sysdeps/unix/sysv/linux/wait4.c: No such file or directory
+#4  0x0000752e2b3426f3 in ggml_print_backtrace () from <repo>/llm/vulkan/bin/../lib/libggml-base.so.0
+#5  0x0000752e2b35754f in ggml_uncaught_exception() () from <repo>/llm/vulkan/bin/../lib/libggml-base.so.0
+#6  0x0000752e2b4c364a in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#7  0x0000752e2b4abc6c in std::terminate() () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x0000752e2b4abc86 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#9  0x0000752e2651fd3a in vk_queue_handle_synchronized::submit(vk::ArrayProxy<vk::SubmitInfo const>, vk::Fence) () from <repo>/llm/vulkan/bin/libggml-vulkan.so
+#10 0x0000752e263164c2 in ggml_vk_submit(std::shared_ptr<vk_context_struct>&, vk::Fence) () from <repo>/llm/vulkan/bin/libggml-vulkan.so
+#11 0x0000752e2631794c in ggml_vk_synchronize(ggml_backend_vk_context*) () from <repo>/llm/vulkan/bin/libggml-vulkan.so
+#12 0x0000752e26317a54 in ggml_backend_vk_synchronize(ggml_backend*) () from <repo>/llm/vulkan/bin/libggml-vulkan.so
+#13 0x0000752e2b36184d in ggml_backend_sched_graph_compute_async () from <repo>/llm/vulkan/bin/../lib/libggml-base.so.0
+#14 0x0000752e2a704520 in llama_context::graph_compute(ggml_cgraph*, bool) () from <repo>/llm/vulkan/bin/../lib/libllama.so.0
+#15 0x0000752e2a707df9 in llama_context::process_ubatch(llama_ubatch const&, llm_graph_type, llama_memory_context_i*, ggml_status&) () from <repo>/llm/vulkan/bin/../lib/libllama.so.0
+#16 0x0000752e2a70f876 in llama_context::decode(llama_batch const&) () from <repo>/llm/vulkan/bin/../lib/libllama.so.0
+#17 0x0000752e2a711042 in llama_decode () from <repo>/llm/vulkan/bin/../lib/libllama.so.0
+#18 0x0000752e2b71e24b in test_prompt(llama_context*, int, int, int) () from <repo>/llm/vulkan/bin/../lib/libllama-bench-impl.so
+#19 0x0000752e2b73215a in llama_bench(int, char**) () from <repo>/llm/vulkan/bin/../lib/libllama-bench-impl.so
+#20 0x0000752e2b02a601 in __libc_start_call_main (main=main@entry=0x5d1e498582f0 <main>, argc=argc@entry=17, argv=argv@entry=0x7ffccc764098) at ../sysdeps/nptl/libc_start_call_main.h:59
+⚠️ warning: 59	../sysdeps/nptl/libc_start_call_main.h: No such file or directory
+#21 0x0000752e2b02a718 in __libc_start_main_impl (main=0x5d1e498582f0 <main>, argc=17, argv=0x7ffccc764098, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7ffccc764088) at ../csu/libc-start.c:360
+⚠️ warning: 360	../csu/libc-start.c: No such file or directory
+#22 0x00005d1e49858325 in _start ()
+[Inferior 1 (process 7847) detached]
+terminate called after throwing an instance of 'vk::DeviceLostError'
+  what():  vk::Queue::submit: ErrorDeviceLost
+--- navratovy kod: 134 ---
+cas konca: 06:23:36

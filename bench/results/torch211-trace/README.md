@@ -85,19 +85,26 @@ instead of MIOpen. With it, the full verification passes **9/9 including the
 backward pass**, zero GPU resets ([`trace-no-miopen.log`](trace-no-miopen.log)).
 
 It is not free. Convolution forward, measured without ever running MIOpen's
-backward ([`convcost.py`](convcost.py), [`convcost.log`](convcost.log)):
+backward ([`convcost.py`](convcost.py); logs at [2400 MHz](convcost-2400.log) and
+[2000 MHz](convcost.log)):
 
-| Conv forward | MIOpen | native | |
-| --- | ---: | ---: | --- |
-| 3→32, 16×64×64 | 0.52 ms | 1.64 ms | 3.2× slower |
-| 64→128, 16×64×64 | 5.75 ms | 15.51 ms | 2.7× slower |
+| Conv forward | iGPU clock | MIOpen | native | |
+| --- | --- | ---: | ---: | --- |
+| 3→32, 16×64×64 | 2400 MHz | 0.52 ms | 1.31 ms | 2.5× slower |
+| | 2000 MHz | 0.52 ms | 1.64 ms | 3.2× slower |
+| 64→128, 16×64×64 | 2400 MHz | 5.12 ms | 13.79 ms | 2.7× slower |
+| | 2000 MHz | 5.75 ms | 15.51 ms | 2.7× slower |
+
+The small MIOpen conv takes 0.52 ms at both clocks — too short to be bound by
+compute — so the workaround's relative cost there depends on the clock; on the
+larger conv it is 2.7× at either.
 
 MIOpen forward is correct and fast, so the workaround only earns its cost where
 the backward pass is needed:
 
 - **Inference** (ComfyUI, generation, anything `torch.no_grad()`): leave MIOpen
   **on**. No workaround needed.
-- **Training**: set `torch.backends.cudnn.enabled = False` and accept roughly 3×
+- **Training**: set `torch.backends.cudnn.enabled = False` and accept 2.5–3×
   slower convolutions.
 
 ### Nothing else found
@@ -132,12 +139,16 @@ use.
 | Traced verification, isolation, fix tests | 2300 MHz | memory access fault in conv backward, host fine |
 | Original cost measurement | 2300 MHz | host froze |
 | Safe cost measurement, 20-op sweep, CPU vs APU | **2000 MHz stock** | all pass |
+| Safe cost measurement, CPU vs APU ×4 | 2400 MHz, overclock restored | all pass, 0 GPU faults |
 
 The iGPU overclock and CPU Curve Optimizer were removed **after** the third
-freeze, and the stock 2000 MHz clock confirmed under load via `pp_dpm_sclk`.
+freeze, and the stock 2000 MHz clock confirmed under load via `pp_dpm_sclk`. The
+iGPU was set back to 2400 MHz the same evening, again confirmed under load, and
+the safe cost measurement — which includes native convolution backward — passed
+there with no GPU faults. The 20-op sweep has not been repeated at 2400 MHz.
 
-**The conv-backward fault has not been reproduced at stock clock** — it was
-deliberately not run again, since its failure mode is a host freeze. The case
+**The conv-backward fault has not been re-run since** — not at stock clock and
+not after the overclock was restored — because its failure mode is a host freeze. The case
 that it is software rests on its character, not on the hardware state: a memory
 access fault at the same operation, isolated to one component, with the forward
 pass of that same component working at the same size. Overclock instability does

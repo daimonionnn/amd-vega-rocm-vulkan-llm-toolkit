@@ -1,0 +1,13 @@
+16:30:29 [relu] BEGIN gpu backward
+16:30:30 [relu] END   gpu backward
+16:30:30 [relu] PASS  input-grad err 0.00e+00  weight-grad err 0.00e+00
+16:30:32 [linear] BEGIN gpu backward
+16:30:32 [linear] END   gpu backward
+16:30:32 [linear] PASS  input-grad err 4.77e-07  weight-grad err 0.00e+00
+16:30:34 [batchnorm] BEGIN gpu backward
+16:30:35 [batchnorm] END   gpu backward
+16:30:35 [batchnorm] PASS  input-grad err 7.64e-08  weight-grad err 4.43e-05
+16:30:37 [conv] BEGIN gpu backward
+16:30:41 [conv] END   gpu backward
+16:30:41 [conv] PASS  input-grad err 9.54e-07  weight-grad err 1.02e-03
+16:30:43 [conv_s2] BEGIN gpu backward

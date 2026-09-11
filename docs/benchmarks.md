@@ -21,14 +21,13 @@ The file is organised by *question*, not by date:
 carries [`patches/0001`](../patches/README.md) (`v_mad_mix_f32`). Machine cooled below
 55 °C between runs.
 
-> **Measured with the iGPU clocked at 2400 MHz.** On 2026-09-11, after repeated host freezes,
-> the iGPU overclock was removed entirely and the iGPU now runs at its stock **2000 MHz**
-> (confirmed under load via `pp_dpm_sclk`). Expect compute-bound numbers — prefill
-> especially — to come out roughly 17 % lower (2000/2400) if you re-measure on the current
-> configuration. The freezes were later traced to software (PyTorch 2.11 / MIOpen), not the
-> overclock. Decode is bound by memory
-> bandwidth rather than GPU clock and should move much less. A drop of that size on a
-> re-run is the clock, not a software regression. Raw data:
+> **Measured with the iGPU overclocked to 2400 MHz** (stock is 2000 MHz). For a few hours on
+> 2026-09-11 it ran at stock after a series of host freezes; those were traced to software
+> (PyTorch 2.11 / MIOpen), not the overclock, which was restored the same evening and
+> confirmed under load via `pp_dpm_sclk` — so these tables match the current configuration.
+> At stock, expect compute-bound numbers — prefill especially — to come out roughly 17 % lower
+> (2000/2400). Decode is bound by memory bandwidth rather than GPU clock and should move much
+> less. A drop of that size on a re-run is the clock, not a software regression. Raw data:
 [2026-09-08 matrix](../bench/results/2026-09-08-matrix.tsv),
 [`-ub` sweep](../bench/results/2026-09-09-ub-sweep.tsv).
 

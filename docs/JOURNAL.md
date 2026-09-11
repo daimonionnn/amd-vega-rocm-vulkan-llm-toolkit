@@ -207,7 +207,7 @@ running it. At 2300 MHz it did not freeze: the autograd backward pass died with
 `Memory access fault by GPU`. Isolating component by component narrowed it to
 **MIOpen's convolution backward**, for some shapes — not stride as such, and not a
 tuning database shipped for a 56-CU Vega 56. Forward is fine, so inference needs
-nothing and training needs `torch.backends.cudnn.enabled = False`, at about 3× on
+nothing and training needs `torch.backends.cudnn.enabled = False`, at 2.5–3× on
 convolutions. [Evidence](../bench/results/torch211-trace/README.md).
 
 Two further lessons fell out, both worth more than the PyTorch result.
@@ -223,6 +223,16 @@ came from the same experimental stack while the stable ones survived identical
 loads, and the fault, once caught, was deterministic. The overclock was not the
 cause — though it did make the same fault freeze the host at 2400 MHz where it
 only killed a process at 2300.
+
+That evening the iGPU went back to 2400 MHz, and the PyTorch figures that existed
+only at stock clock were re-run there, so every benchmark in the repo shares one
+clock. The safe conv-cost measurement passed at the clock that had frozen the host
+twice. Repeating the CPU-vs-APU run four times also exposed how it had been
+published: the 2400 MHz ratios were computed against one session's CPU figures
+while the table printed another's, and a single run had been taken at face value
+where the CPU varies 4–9 % between runs — and once, on the first run after boot,
+30 % on attention. The APU repeats within about 1 %. The page now reports medians,
+with CPU and APU from the same session.
 
 ---
 

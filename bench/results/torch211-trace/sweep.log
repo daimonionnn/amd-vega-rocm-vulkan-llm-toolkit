@@ -1,0 +1,40 @@
+16:56:49 [pool] BEGIN max_pool2d
+16:56:49 [pool] END   max_pool2d  PASS  0.00e+00
+16:56:49 [pool] BEGIN avg_pool2d
+16:56:49 [pool] END   avg_pool2d  PASS  0.00e+00
+16:56:49 [pool] BEGIN adaptive_avg_pool2d
+16:56:49 [pool] END   adaptive_avg_pool2d  PASS  0.00e+00
+16:56:51 [upsample] BEGIN interpolate nearest
+16:56:51 [upsample] END   interpolate nearest  PASS  0.00e+00
+16:56:51 [upsample] BEGIN interpolate bilinear
+16:56:51 [upsample] END   interpolate bilinear  PASS  0.00e+00
+16:56:53 [norm] BEGIN group_norm
+16:56:54 [norm] END   group_norm  PASS  4.77e-07
+16:56:54 [norm] BEGIN instance_norm
+16:56:54 [norm] END   instance_norm  PASS  7.15e-07
+16:56:56 [activation] BEGIN gelu
+16:56:56 [activation] END   gelu  PASS  4.77e-07
+16:56:56 [activation] BEGIN silu
+16:56:56 [activation] END   silu  PASS  4.77e-07
+16:56:56 [activation] BEGIN mish
+16:56:56 [activation] END   mish  PASS  2.38e-07
+16:56:56 [activation] BEGIN leaky_relu
+16:56:56 [activation] END   leaky_relu  PASS  0.00e+00
+16:56:58 [index] BEGIN embedding
+16:56:58 [index] END   embedding  PASS  0.00e+00
+16:56:58 [index] BEGIN gather
+16:56:58 [index] END   gather  PASS  0.00e+00
+16:57:00 [sort] BEGIN cumsum
+16:57:01 [sort] END   cumsum  PASS  3.81e-05
+16:57:01 [sort] BEGIN sort values
+16:57:01 [sort] END   sort values  PASS  0.00e+00
+16:57:01 [sort] BEGIN topk values
+16:57:01 [sort] END   topk values  PASS  0.00e+00
+16:57:03 [linalg] BEGIN bmm
+16:57:04 [linalg] END   bmm  PASS  0.00e+00
+16:57:04 [linalg] BEGIN einsum
+16:57:04 [linalg] END   einsum  PASS  0.00e+00
+16:57:05 [loss_backward] BEGIN linear+ce backward (rocBLAS, not MIOpen)
+16:57:06 [loss_backward] END   linear+ce backward  PASS  1.28e-07
+16:57:08 [conv_transpose] BEGIN conv_transpose2d
+16:57:11 [conv_transpose] END   conv_transpose2d  PASS  9.54e-06

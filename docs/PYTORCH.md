@@ -73,7 +73,7 @@ Memory access fault by GPU node-1 on address 0x7ab6d7023000
 
 — and it froze the host three times: twice with the iGPU overclocked to 2400 MHz
 before the fault was isolated, once at 2300 MHz during a cost measurement. It was
-isolated at 2300 MHz and has deliberately not been re-run at the stock clock.
+isolated at 2300 MHz and has deliberately not been re-run since, at either clock.
 Which shapes fail depends
 on the algorithm MIOpen selects, not on stride: a small stride-2 conv faulted,
 and so, it appears, did a larger stride-1 one. Disabling MIOpen's tuning
@@ -84,13 +84,13 @@ So:
 | Workload | Setting | Cost |
 | --- | --- | --- |
 | **Inference** — ComfyUI, generation, anything under `torch.no_grad()` | none; leave MIOpen on | none |
-| **Training** | `torch.backends.cudnn.enabled = False` | convolutions ~3× slower |
+| **Training** | `torch.backends.cudnn.enabled = False` | convolutions 2.5–3× slower |
 
 The workaround makes PyTorch use its native convolution instead of MIOpen, and
 with it the full verification passes 9/9 including the backward pass. The cost
-is real — conv forward goes from 5.75 ms to 15.51 ms at 64→128 channels,
-16×64×64, measured at the stock 2000 MHz — which is why it is worth applying only
-when you need gradients.
+is real — conv forward goes from 5.12 ms to 13.79 ms at 64→128 channels,
+16×64×64, with the iGPU at 2400 MHz (5.75 → 15.51 ms at the stock 2000 MHz) —
+which is why it is worth applying only when you need gradients.
 
 `torch 2.7.0+rocm6.3` has no such fault and needs neither the injection nor the
 switch. Prefer it unless you need something from a newer PyTorch.
@@ -128,7 +128,7 @@ Neither applies today. Stay on 2.7.0 until one does.
 `torch.backends.miopen.immediate`, which switches MIOpen to Immediate Mode — a
 different algorithm-selection path from the find mode that picks the faulting
 backward algorithm. It might avoid the fault while keeping MIOpen, instead of
-paying ~3× for `cudnn.enabled = False`. Untested; 2.11 also made MIOpen
+paying 2.5–3× for `cudnn.enabled = False`. Untested; 2.11 also made MIOpen
 channels-last opt-in again (`PYTORCH_MIOPEN_SUGGEST_NHWC=1`), which touches the
 same code. Try it the way the fault was isolated here — traced to disk, one step
 per process — because the failure mode can be a host freeze.
@@ -243,10 +243,10 @@ been a hard blocker.
 
 ## What to expect from the hardware
 
-**About 1.19 TFLOP/s fp32 at the stock 2000 MHz** (1.40 overclocked to 2400),
-roughly 58 % of this iGPU's theoretical peak at that clock
-(8 CU × 64 lanes × 2 flop × 2.0 GHz = 2.05 TFLOP/s). Larger matrices do better —
-4096³ reaches 83 %. For scale, a discrete
+**About 1.40 TFLOP/s fp32 with the iGPU at 2400 MHz** (1.19 at the stock 2000),
+roughly 57 % of this iGPU's theoretical peak at that clock
+(8 CU × 64 lanes × 2 flop × 2.4 GHz = 2.46 TFLOP/s). Larger matrices do better —
+4096³ reaches 80 %. For scale, a discrete
 Radeon Pro V340 die was reported at ~7 TFLOP/s in issue #1, and a modern dGPU is
 another order beyond that.
 
@@ -268,27 +268,27 @@ Two caveats to that:
 
 ## How fast is it, really — against this machine's own CPU
 
-Measured 2026-09-11 at the **stock 2000 MHz** iGPU clock
+Measured 2026-09-11 with the iGPU at **2400 MHz**, median of four runs
 ([full results](../bench/results/2026-09-11-pytorch-cpu-vs-apu.md), which also
-has the 2400 MHz overclocked figures):
+has the stock 2000 MHz figures):
 
 | Workload | CPU (8 threads) | APU | Ratio |
 | --- | ---: | ---: | ---: |
-| sgemm fp32 4096³ | 677 GF | **1694 GF** | 2.5× |
-| sgemm fp16 4096³ | 0.4 GF | **1994 GF** | — |
-| conv2d 16×64×128×128 | 90.0 ms | **17.9 ms** | 5.0× |
-| **attention 4×12×1024×64** | **20.2 ms** | 56.3 ms | **0.36×** |
+| sgemm fp32 4096³ | 680 GF | **1955 GF** | 2.9× |
+| sgemm fp16 4096³ | 0.4 GF | **2336 GF** | — |
+| conv2d 16×64×128×128 | 87.2 ms | **14.9 ms** | 5.8× |
+| **attention 4×12×1024×64** | **20.9 ms** | 50.8 ms | **0.41×** |
 
-Overclocking the iGPU to 2400 MHz is worth about 17 % on convolution, 13–15 % on
-matmul and only 10 % on attention, which is memory-bound.
+At the stock 2000 MHz the APU loses about 17 % on convolution, 13–15 % on matmul
+and only 10 % on attention, which is memory-bound.
 
-**The fp32 gap is only about 2.5×** — this CPU reaches ~700 GFLOP/s, so the iGPU
+**The fp32 gap is under 3×** — this CPU reaches ~700 GFLOP/s, so the iGPU
 is a useful speedup rather than a different league. **fp16 on the CPU is
 unusable** (no optimised path; use fp32 or bf16 there), while the APU reaches
-1994 GF. **Convolution is the APU's best case at 5×**, which is encouraging
+2336 GF. **Convolution is the APU's best case at nearly 6×**, which is encouraging
 for image work.
 
-**Attention is nearly 3× faster on the CPU**, and that one deserves care. On gfx900
+**Attention is about 2.4× faster on the CPU**, and that one deserves care. On gfx900
 PyTorch has only the `MATH` attention backend — both `FLASH` and
 `MEM_EFFICIENT` report "No available kernel" — so it materialises the full
 `seq × seq` matrix instead of avoiding it. Transformer work here will be
@@ -303,7 +303,7 @@ silicon.
 results.
 
 The compute path is proven and the measurements are mildly encouraging.
-Convolution is the APU's strongest case — 5× the CPU at stock clock — and
+Convolution is the APU's strongest case — nearly 6× the CPU at 2400 MHz, 5× at stock — and
 diffusion models spend most of their time there. Memory is not the constraint it is on an 8 GB
 card, so SDXL should fit where it otherwise would not.
 

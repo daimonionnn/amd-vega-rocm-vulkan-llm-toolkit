@@ -7,6 +7,8 @@ llm/
 
 # Log files
 *.log
+# ...except raw benchmark evidence, which the write-ups link to
+!bench/results/**/*.log
 
 # Python cache / envs
 __pycache__/

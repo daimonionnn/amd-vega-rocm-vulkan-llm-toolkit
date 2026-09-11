@@ -1,0 +1,12 @@
+16:55:37 [native_fwd] BEGIN 3->32 16x64x64
+16:55:37 [native_fwd] END   3->32 16x64x64  1.64 ms
+16:55:37 [native_fwd] BEGIN 64->128 16x64x64
+16:55:37 [native_fwd] END   64->128 16x64x64  15.51 ms
+16:55:39 [miopen_fwd] BEGIN 3->32 16x64x64
+16:55:43 [miopen_fwd] END   3->32 16x64x64  0.52 ms
+16:55:43 [miopen_fwd] BEGIN 64->128 16x64x64
+16:55:44 [miopen_fwd] END   64->128 16x64x64  5.75 ms
+16:55:46 [native_fwdbwd] BEGIN 3->32 16x64x64
+16:55:46 [native_fwdbwd] END   3->32 16x64x64  4.42 ms
+16:55:46 [native_fwdbwd] BEGIN 64->128 16x64x64
+16:55:47 [native_fwdbwd] END   64->128 16x64x64  69.76 ms

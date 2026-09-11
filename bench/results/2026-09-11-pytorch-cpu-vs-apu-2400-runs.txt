@@ -1,0 +1,51 @@
+PyTorch CPU vs APU -- torch 2.7.0+rocm6.3, iGPU at 2400 MHz, raw output of four runs
+bench/results/pytorch-cpu-vs-apu.py, 2026-09-11, back to back; run 1 was the first GPU work after a reboot.
+iGPU clock sampled every 0.5 s from pp_dpm_sclk across these runs and the convcost runs in
+torch211-trace/convcost-2400.log: 92 samples under load, every one "1: 2400Mhz *" (the rest idle,
+"1: 0Mhz *"). 0 GPU resets or page faults in dmesg afterwards.
+
+Columns: workload, CPU (8 threads), APU, APU speed / CPU speed.
+
+run 1  20:03:30  edge 34 C
+  sgemm fp32 1024^3              781.7 GF    1248.2 GF    1.60x
+  sgemm fp32 2048^3              707.0 GF    1399.6 GF    1.98x
+  sgemm fp32 4096^3              669.8 GF    1933.5 GF    2.89x
+  sgemm fp16 2048^3                     -    2035.0 GF        -
+  sgemm fp16 4096^3                     -    2337.0 GF        -
+  conv2d 16x64x128x128            87.9 ms      14.9 ms    5.89x
+  attention 4x12x1024x64          26.1 ms      50.7 ms    0.52x
+
+run 2  20:05:32  Tctl 38 C
+  sgemm fp32 1024^3              806.0 GF    1268.6 GF    1.57x
+  sgemm fp32 2048^3              689.3 GF    1397.9 GF    2.03x
+  sgemm fp32 4096^3              678.0 GF    1955.0 GF    2.88x
+  sgemm fp16 2048^3                     -    2015.4 GF        -
+  sgemm fp16 4096^3                     -    2335.9 GF        -
+  conv2d 16x64x128x128            84.5 ms      14.9 ms    5.66x
+  attention 4x12x1024x64          20.0 ms      50.7 ms    0.39x
+
+run 3  20:05:47  Tctl 73 C
+  sgemm fp32 1024^3              792.0 GF    1273.3 GF    1.61x
+  sgemm fp32 2048^3              725.2 GF    1399.7 GF    1.93x
+  sgemm fp32 4096^3              694.3 GF    1955.5 GF    2.82x
+  sgemm fp16 2048^3                     -    2033.0 GF        -
+  sgemm fp16 4096^3                     -    2336.0 GF        -
+  conv2d 16x64x128x128            86.4 ms      14.9 ms    5.78x
+  attention 4x12x1024x64          21.8 ms      50.8 ms    0.43x
+
+run 4  20:06:01  Tctl 76 C
+  sgemm fp32 1024^3              790.1 GF    1269.7 GF    1.61x
+  sgemm fp32 2048^3              714.5 GF    1399.1 GF    1.96x
+  sgemm fp32 4096^3              681.6 GF    1954.5 GF    2.87x
+  sgemm fp16 2048^3                     -    2023.0 GF        -
+  sgemm fp16 4096^3                     -    2335.4 GF        -
+  conv2d 16x64x128x128            92.1 ms      14.9 ms    6.17x
+  attention 4x12x1024x64          19.9 ms      50.8 ms    0.39x
+
+Medians (mean of the middle two):
+  sgemm fp32 2048^3     CPU 710.8 GF   APU 1399.4 GF   2.0x
+  sgemm fp32 4096^3     CPU 679.8 GF   APU 1954.8 GF   2.9x
+  sgemm fp16 2048^3                    APU 2028.0 GF
+  sgemm fp16 4096^3                    APU 2336.0 GF
+  conv2d                CPU 87.2 ms    APU 14.9 ms     5.8x
+  attention             CPU 20.9 ms    APU 50.8 ms     0.41x

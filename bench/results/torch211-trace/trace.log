@@ -1,0 +1,15 @@
+16:23:50 === torch 2.11.0+rocm7.2 HIP 7.2.26015 ===
+16:23:51 device gfx900:xnack-
+16:23:51 BEGIN pointwise chain
+16:23:52 END   pointwise chain  PASS  max abs 1.19e-07
+16:23:52 BEGIN sum 4M
+16:23:52 END   sum 4M  PASS  max abs 4.88e-04
+16:23:52 BEGIN softmax
+16:23:52 END   softmax  PASS  max abs 1.49e-08
+16:23:52 BEGIN layer_norm
+16:23:52 END   layer_norm  PASS  max abs 7.15e-07
+16:23:52 BEGIN sdpa attention
+16:23:52 END   sdpa attention  PASS  max abs 3.28e-07
+16:23:52 BEGIN conv net forward
+16:23:57 END   conv net forward  PASS  max abs 2.30e-07
+16:23:57 BEGIN backward pass

@@ -1,0 +1,7 @@
+16:31:55 [no_miopen] BEGIN control stride1
+16:31:55 [no_miopen] END   control stride1  in 3.6e-07 w 2.7e-04
+16:31:55 [no_miopen] BEGIN stride2
+16:31:55 [no_miopen] END   stride2  in 3.6e-07 w 1.8e-04  <-- FIXED
+16:31:57 [nodb] BEGIN control stride1
+16:32:02 [nodb] END   control stride1  in 8.3e-07 w 7.3e+03
+16:32:02 [nodb] BEGIN stride2
