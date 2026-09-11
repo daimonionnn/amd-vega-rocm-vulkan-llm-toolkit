@@ -54,10 +54,38 @@ This mirrors the system packages: ROCm 6.3.4 is the last release whose libraries
 carry consumer gfx9 device code at all. See
 [the package survey](../bench/results/2026-09-10-rocm-gfx900-library-survey.tsv).
 
-Whether a newer wheel could be made to work by injecting the rocBLAS files is an
-open question — the gate is whether PyTorch's own ATen kernels were compiled for
-gfx900, which cannot be settled by inspecting the library (see the TODO in the
-[README](../README.md) for why that check fails misleadingly).
+### Do not use a newer wheel — tried, and it froze the machine
+
+`torch 2.11.0+rocm7.2` can be made to *start*: inject the 128 gfx900 rocBLAS
+files from ROCm 6.3.4 and it passes the smoke test, and a test of basic
+pointwise ops (`add`, `mul`, `exp`, `clamp`, `tanh`, `sigmoid`) on a freshly
+booted GPU. So PyTorch's ATen kernels *are* compiled for gfx900 — the rocBLAS
+files were the only missing piece for simple work.
+
+But the full verification — attention, a conv net, a backward pass, fp16/bf16 —
+**hard-froze the entire machine twice**, once with a CPU overclock enabled and
+once with it disabled. The identical verification passes all 11 checks on
+2.7.0. Two freezes on one specific workload is enough; it was not pursued
+further. [`build/Dockerfile.pytorch-rocm72-vega`](../build/Dockerfile.pytorch-rocm72-vega)
+is kept, marked, so nobody repeats it unknowingly.
+
+**Stay on `torch 2.7.0+rocm6.3`.**
+
+### After a GPU hang, reboot — a driver reset is not enough
+
+This cost four wasted test runs and is worth knowing before you debug anything
+on this APU. When the GPU hangs, the kernel resets it and reports
+`device wedged, but recovered through reset`. **It has not recovered.** After
+the first hang, *every* subsequent GPU job hung too — including the
+known-good torch 2.7.0 on operations it had passed an hour earlier — and
+`dmesg` counted five resets. A reboot restored it immediately: the same test,
+run as the first GPU task after boot, passed with zero resets.
+
+The likely reason is that an APU's GPU shares firmware state (SMU, power
+management) that a driver-level reset does not reinitialise. Whatever the cause,
+the practical rule is: **after any `GPU reset` in `dmesg`, reboot before
+trusting another result.** Anything measured in between is measuring the
+broken state, not the software under test.
 
 ## Two traps
 

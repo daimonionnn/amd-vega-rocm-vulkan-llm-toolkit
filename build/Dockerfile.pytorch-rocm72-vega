@@ -1,4 +1,17 @@
-# EXPERIMENT: can a newer PyTorch be made to work on gfx900?
+# EXPERIMENT — DO NOT USE. Froze the host twice, 2026-09-11.
+#
+# Result: torch 2.11.0+rocm7.2 with the 128 gfx900 rocBLAS files injected passes
+# the smoke test and a pointwise-ops test on a freshly booted GPU. But running
+# build/pytorch-verify.py (attention, a conv net, a backward pass, fp16/bf16)
+# hard-froze the whole machine on BOTH attempts — once with the CPU boost
+# overclock enabled, once with it disabled. The same verification passes all 11
+# checks on torch 2.7.0+rocm6.3. Use build/Dockerfile.pytorch-rocm63-vega.
+#
+# Kept rather than deleted so nobody repeats the experiment unknowingly.
+#
+# Original rationale follows.
+#
+# Can a newer PyTorch be made to work on gfx900?
 #
 # torch 2.7.0+rocm6.3 is the last stock wheel shipping gfx900 kernels (128 files
 # in torch/lib/rocblas/library/). Every wheel after it — 6.4, 7.0, 7.1, 7.2 —
@@ -10,10 +23,22 @@
 # fail at the first GPU op. That cannot be settled by inspecting the library —
 # attempted and it produces false negatives — so it is settled by running.
 #
-# Source of the kernels: ROCm 6.3.4, the same place build/Dockerfile.rocm7-vega
-# takes them from. Those files are known to work with a 7.2-era rocBLAS: that is
-# exactly what the host install does.
-FROM rocm/dev-ubuntu-22.04:6.3.4 AS rocm6-libs
+# Source of the kernels: the ROCm 6.3.4 rocBLAS .deb from AMD's apt repo, the
+# same place build/build-llamacpp-rocm7-baremetal.sh takes them from. Those
+# files are known to work with a 7.2-era rocBLAS -- that is exactly what the
+# host install does.
+#
+# NOT from rocm/dev-ubuntu-22.04:6.3.4. That image carries no
+# rocblas/library directory at all today, so the COPY --from approach used in
+# build/Dockerfile.rocm7-vega cannot work from a clean cache.
+FROM debian:bookworm-slim AS rocm6-libs
+ARG ROCBLAS_DEB=https://repo.radeon.com/rocm/apt/6.3.4/pool/main/r/rocblas/rocblas_4.3.0.60304-76~24.04_amd64.deb
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -sL -o /tmp/rocblas.deb "${ROCBLAS_DEB}" && \
+    dpkg-deb -x /tmp/rocblas.deb /tmp/x && \
+    mkdir -p /gfx900 && \
+    find /tmp/x -path '*rocblas/library*' -name '*gfx900*' -exec cp {} /gfx900/ \; && \
+    ls /gfx900 | wc -l && test "$(ls /gfx900 | wc -l)" -gt 0
 
 FROM python:3.12-slim
 
@@ -25,7 +50,7 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2
 RUN pip install --no-cache-dir --index-url "${TORCH_INDEX}" "torch==${TORCH_VERSION}" && \
     pip install --no-cache-dir numpy
 
-COPY --from=rocm6-libs /opt/rocm/lib/rocblas/library/ /tmp/rocm6-rocblas/
+COPY --from=rocm6-libs /gfx900/ /tmp/rocm6-rocblas/
 RUN set -eux; \
     TL="$(python3 -c 'import torch,os;print(os.path.join(os.path.dirname(torch.__file__),"lib","rocblas","library"))')"; \
     echo "target: $TL"; \
