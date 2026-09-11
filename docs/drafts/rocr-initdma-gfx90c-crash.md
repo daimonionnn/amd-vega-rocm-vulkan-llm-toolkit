@@ -9,10 +9,34 @@ problem rather than a source one, and TheRock owns the gfx900 wheels.
 source if they redirect. ROCR-Runtime has only 5 open issues and looks dormant
 as a standalone repo.
 
-**Before sending, consider:** re-testing against a nightly newer than
-7.14.0a20260612 — this build is three months old and the index appears frozen,
-so the bug may already be fixed. That test is cheap and would either close the
-matter or strengthen the report.
+## Tested 2026-09-11: there is no newer build, and gfx900 was dropped
+
+The obvious pre-flight check — re-test on a newer nightly — cannot be done, and
+finding that out changes what this report is.
+
+- **gfx900 nightlies stop at `7.14.0a20260612`.** Both `rocm.nightlies.amd.com`
+  and the CloudFront origin behind it end there for `rocm-sdk-core` and
+  `rocm-sdk-libraries-gfx900`. June 12 is the last build.
+- **gfx900 is not in the ROCm 7.14.1 release.** Its notes list gfx908, gfx90a,
+  gfx942, gfx950, gfx1030, gfx1100–1103, gfx1150–1153, gfx1200, gfx1201 and
+  gfx1250. No gfx900, gfx906 or gfx90c. The sampled release workflow builds only
+  `gfx94X-dcgpu`.
+- **TheRock can still target them** — `therock_amdgpu_targets.cmake` defines
+  both `gfx900` and `gfx90c` with their exclusion lists — so the June wheels were
+  presumably CI output for a family that is built but not shipped.
+
+**This is therefore not a regression on a supported target.** It is a crash in a
+three-month-old experimental build of an architecture that has since been left
+out of the release. Filing it as a defect overstates the case.
+
+**Revised recommendation.** Do not file this as a bug. Either leave it in this
+repo's documentation as a dead end others can find, or — if anything is sent at
+all — send a short question rather than a defect report: *gfx900 and gfx90c are
+defined as TheRock targets and gfx900 wheels were published until 2026-06-12,
+but `hsa_init()` segfaults on gfx90c; are these families intended to be usable,
+or is the CI output incidental?* That question is answerable in a sentence and
+does not ask anyone to debug a dropped architecture. The analysis below stands
+if they want it.
 
 ---
 
@@ -144,6 +168,26 @@ source.
 
 If a `-dbgsym` artifact or the exact `rocm-systems` revision for
 `7.14.0a20260612` can be pointed at, I am happy to re-run and report back.
+
+## Why discrete Vega10 works while this APU does not
+
+Reported in
+<https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/issues/1>: a
+Radeon Pro V340 (discrete Vega10, native gfx900) runs 7.14.1-era packages
+successfully. Two differences plausibly account for it, and they compound:
+
+1. **Different code path in this very function.** `InitDma`'s blit setup is
+   guarded by `if (use_sdma && (HSA_PROFILE_BASE == profile_))`. A discrete GPU
+   reports `HSA_PROFILE_BASE`; an APU with coherent integrated memory reports
+   `HSA_PROFILE_FULL` and takes the other path. So the dGPU that works and the
+   APU that crashes do not execute the same code here. (Caveat: that branch sits
+   inside a lazily-evaluated lambda, so on its own it does not explain a crash
+   *during* `InitDma`.)
+2. **Different build entirely.** That report used modular `amdrocm*7.14.1`
+   **deb packages**; this one uses TheRock **pip wheels** `7.14.0a20260612`.
+   Different packaging, different build configuration, and — given the evidence
+   points at an ABI or layout mismatch — possibly the more important difference
+   of the two.
 
 ## Why it may be worth fixing
 
