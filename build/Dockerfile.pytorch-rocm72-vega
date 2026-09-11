@@ -1,5 +1,9 @@
 # EXPERIMENT — DO NOT USE. Froze the host twice, 2026-09-11.
 #
+# Root cause found on a third, traced run: the autograd BACKWARD PASS triggers
+# "Memory access fault by GPU node-1" — a deterministic invalid GPU address.
+# Forward passes work. See bench/results/torch211-trace/.
+#
 # Result: torch 2.11.0+rocm7.2 with the 128 gfx900 rocBLAS files injected passes
 # the smoke test and a pointwise-ops test on a freshly booted GPU. But running
 # build/pytorch-verify.py (attention, a conv net, a backward pass, fp16/bf16)

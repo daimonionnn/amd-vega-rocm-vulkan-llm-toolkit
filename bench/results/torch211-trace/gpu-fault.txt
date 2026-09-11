@@ -1,0 +1,14 @@
+Memory access fault by GPU node-1 (Agent handle: 0x5974d773ca10) on address 0x7ab6d7023000. Reason: Unknown.
+GPU coredump: execvp failed: No such file or directory
+GPU coredump: handler exited with error (status: 1)
+GPU core dump failed
+[  540.835296] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835322] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835354] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835569] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835589] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835601] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835613] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835626] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.835642] amdgpu 0000:0a:00.0:  Process python3 pid 8242 thread python3 pid 8242
+[  540.860844] traps: python3[8328] general protection fault ip:7ab9c1b76507 sp:7ab80a1fdc10 error:0

@@ -62,11 +62,22 @@ pointwise ops (`add`, `mul`, `exp`, `clamp`, `tanh`, `sigmoid`) on a freshly
 booted GPU. So PyTorch's ATen kernels *are* compiled for gfx900 — the rocBLAS
 files were the only missing piece for simple work.
 
-But the full verification — attention, a conv net, a backward pass, fp16/bf16 —
-**hard-froze the entire machine twice**, once with a CPU overclock enabled and
-once with it disabled. The identical verification passes all 11 checks on
-2.7.0. Two freezes on one specific workload is enough; it was not pursued
-further. [`build/Dockerfile.pytorch-rocm72-vega`](../build/Dockerfile.pytorch-rocm72-vega)
+But the full verification **hard-froze the entire machine twice** with the iGPU
+at 2400 MHz. A third run, at the user's request and with the iGPU at 2300 MHz,
+logged every step to disk before running it — and found the culprit:
+
+```
+BEGIN backward pass
+Memory access fault by GPU node-1 on address 0x7ab6d7023000
+```
+
+**torch 2.11's autograd backward pass makes the GPU access an invalid address.**
+Forward passes are fine, including attention and a conv net. That is a software
+bug, and a deterministic one — not the scattered corruption a marginal clock
+causes. At 2300 MHz it killed one process with no GPU reset; at 2400 MHz the
+same workload froze the host. See
+[the trace](../bench/results/torch211-trace/README.md). The identical backward
+pass succeeds on 2.7.0. [`build/Dockerfile.pytorch-rocm72-vega`](../build/Dockerfile.pytorch-rocm72-vega)
 is kept, marked, so nobody repeats it unknowingly.
 
 **Stay on `torch 2.7.0+rocm6.3`.**
