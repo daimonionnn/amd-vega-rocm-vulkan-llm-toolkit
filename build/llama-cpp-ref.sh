@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by the build scripts. Sets LLAMA_CPP_REF from build/llama.cpp-ref.
 # Kept separate so the Dockerfiles can read the same file via --build-arg.
 _ref_file="$(dirname "${BASH_SOURCE[0]}")/llama.cpp-ref"

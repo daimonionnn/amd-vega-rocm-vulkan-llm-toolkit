@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by the build scripts, from inside the llama.cpp checkout.
 # Applies every patch in patches/ in filename order.
 #

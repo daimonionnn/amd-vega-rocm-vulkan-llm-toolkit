@@ -184,7 +184,7 @@ backport_tensile_libs() {
     fi
 
     WORK_TMPDIR="$(mktemp -d /tmp/rocblas634.XXXXXX)"
-    trap "rm -rf $WORK_TMPDIR" EXIT
+    trap 'rm -rf "$WORK_TMPDIR"' EXIT
 
     echo "  Downloading rocBLAS 6.3.4 package from AMD repo..."
     cd "$WORK_TMPDIR"

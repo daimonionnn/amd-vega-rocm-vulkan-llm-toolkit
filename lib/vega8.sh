@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared Vega 8 (gfx90c) detection. Source it; do not execute it.
 #
 #   source "$SCRIPT_DIR/../lib/vega8.sh"

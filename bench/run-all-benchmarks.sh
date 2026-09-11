@@ -61,6 +61,7 @@ PROMPT_SIZES=(128 1024 4096)
 # TODO: this setting is currently ignored — the inline python in run_bench()
 #       hardcodes its own GEN_TOKENS=50. Pass it through as an argv, the way
 #       bench/tune-rocm7-vega.sh already does.
+# shellcheck disable=SC2034  # unused until that TODO is done
 GEN_TOKENS=50
 
 # Where to write per-backend result CSVs  (label, prompt_words, ctx_tokens, prefill, decode)
@@ -125,8 +126,8 @@ start_rocm7_docker() {
     local fa_flag="$1"
     echo "  [start] ROCm 7.2 — Docker (image: llama-rocm7-vega) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
     # Stop any existing container on this image or port
-    docker stop $(docker ps -q --filter "ancestor=llama-rocm7-vega") 2>/dev/null || true
-    docker stop $(docker ps -q --filter "publish=$SERVER_PORT") 2>/dev/null || true
+    docker ps -q --filter "ancestor=llama-rocm7-vega" | xargs -r docker stop >/dev/null 2>&1 || true
+    docker ps -q --filter "publish=$SERVER_PORT" | xargs -r docker stop >/dev/null 2>&1 || true
     sleep 1
 
     local render_node
@@ -158,8 +159,8 @@ start_rocm7_docker() {
 start_rocm6_docker() {
     local fa_flag="$1"
     echo "  [start] ROCm 6.2.4 — Docker (image: llama-server-rocm-vega) | $fa_flag | -ngl 99 | -c $CONTEXT_SIZE"
-    docker stop $(docker ps -q --filter "ancestor=llama-server-rocm-vega") 2>/dev/null || true
-    docker stop $(docker ps -q --filter "publish=$SERVER_PORT") 2>/dev/null || true
+    docker ps -q --filter "ancestor=llama-server-rocm-vega" | xargs -r docker stop >/dev/null 2>&1 || true
+    docker ps -q --filter "publish=$SERVER_PORT" | xargs -r docker stop >/dev/null 2>&1 || true
     sleep 1
 
     local render_node
@@ -345,7 +346,7 @@ wait_for_server() {
 
 stop_server() {
     # Stop Docker containers
-    docker stop $(docker ps -q --filter "publish=$SERVER_PORT") 2>/dev/null || true
+    docker ps -q --filter "publish=$SERVER_PORT" | xargs -r docker stop >/dev/null 2>&1 || true
     # Kill native processes
     pkill -f "llama-server.*port $SERVER_PORT" 2>/dev/null || true
     kill "$SERVER_PID" 2>/dev/null || true

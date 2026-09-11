@@ -26,7 +26,6 @@ set -euo pipefail
 
 ROCM_VERSION="7.2"
 ROCM_REPO_BASE="https://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
-AMDGPU_REPO_BASE="https://repo.radeon.com/amdgpu/6.3.4/ubuntu"
 UBUNTU_CODENAME="noble"        # Use 24.04 packages on Ubuntu 25.10 / 26.04
 ROCM_KEYRING_URL="https://repo.radeon.com/rocm/rocm.gpg.key"
 ROCM_KEYRING_PATH="/etc/apt/keyrings/rocm.gpg"
@@ -189,9 +188,17 @@ fix_libxml2_soname() {
         return
     fi
 
-    local newest
-    newest=$(ls -1 /lib/x86_64-linux-gnu/libxml2.so.* 2>/dev/null \
-             | grep -E 'libxml2\.so\.[0-9]+$' | sort -V | tail -1 || true)
+    local newest=""
+    local candidates=()
+    for candidate in /lib/x86_64-linux-gnu/libxml2.so.*; do
+        # Bare sonames only — libxml2.so.2, not libxml2.so.2.9.14
+        if [[ -e $candidate && $candidate =~ \.so\.[0-9]+$ ]]; then
+            candidates+=("$candidate")
+        fi
+    done
+    if [ ${#candidates[@]} -gt 0 ]; then
+        newest=$(printf '%s\n' "${candidates[@]}" | sort -V | tail -1)
+    fi
     if [ -z "$newest" ]; then
         echo "  ⚠  No libxml2.so.* found — install libxml2 if hipcc fails to start"
         echo ""

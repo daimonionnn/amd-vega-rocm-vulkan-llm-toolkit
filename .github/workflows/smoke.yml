@@ -42,7 +42,10 @@ jobs:
       - name: no `| grep -q` under pipefail
         run: |
           # The SIGPIPE trap above. Capture the output first, or use bash [[ ]].
-          if git ls-files '*.sh' | xargs grep -n '| *grep -q' 2>/dev/null | grep -v '^\s*#'; then
+          # grep -n prefixes each hit with "file:line:", so comments explaining
+          # the idiom are excluded on the text after that prefix — anchoring the
+          # exclusion at the start of the line never matched anything.
+          if git ls-files '*.sh' | xargs grep -nE '\| *grep -q' 2>/dev/null | grep -vE ':[0-9]+: *#'; then
             echo "::error::pipe-to-grep-q dies under set -o pipefail when the writer takes SIGPIPE"
             exit 1
           fi
