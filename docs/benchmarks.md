@@ -19,7 +19,14 @@ The file is organised by *question*, not by date:
 
 `llama-bench -ngl 99 -r 1`, prefill via `-p <ctx>`, decode via `-n 32 -d <ctx>`. ROCm build
 carries [`patches/0001`](../patches/README.md) (`v_mad_mix_f32`). Machine cooled below
-55 °C between runs. Raw data:
+55 °C between runs.
+
+> **Measured with the iGPU clocked at 2400 MHz.** On 2026-09-11 the iGPU was taken down
+> to **2300 MHz** after repeated host freezes (confirmed under load via `pp_dpm_sclk`).
+> Expect compute-bound numbers — prefill especially — to come out roughly 4 % lower
+> (2300/2400) if you re-measure on the current configuration. Decode is bound by memory
+> bandwidth rather than GPU clock and should move much less. A drop of that size on a
+> re-run is the clock, not a software regression. Raw data:
 [2026-09-08 matrix](../bench/results/2026-09-08-matrix.tsv),
 [`-ub` sweep](../bench/results/2026-09-09-ub-sweep.tsv).
 

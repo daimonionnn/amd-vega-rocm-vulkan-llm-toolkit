@@ -23,7 +23,8 @@ Toolkit for ROCm and Vulkan LLM inference on Vega APUs/GPUs (tested on AMD Ryzen
 ### Benchmarks — September 2026
 
 `llama-bench -ngl 99`, ROCm carrying [`patches/0001`](patches/README.md), machine cooled
-below 55 °C between runs. Prefill = prompt processing, TG = token generation at that KV
+below 55 °C between runs, **iGPU at 2400 MHz** — since 2026-09-11 it runs at 2300 MHz, so a
+re-run will show prefill roughly 4 % lower for that reason alone. Prefill = prompt processing, TG = token generation at that KV
 depth. Every row is at the micro-batch that backend actually ships, given in its own
 column — ROCm 4096, Vulkan 2048, CPU the 512 default. **TG does not depend on the
 micro-batch**, so those columns carry over unchanged. Raw data:
