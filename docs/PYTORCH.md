@@ -101,6 +101,46 @@ device: AMD Radeon Graphics  arch=gfx900:xnack-  CUs=8  mem=64.0 GiB
   fp32 sgemm 2048^3: 12.2 ms/iter = 1.40 TFLOP/s
 ```
 
+### Beyond the libraries: does a real network compute correctly?
+
+[`build/pytorch-verify.py`](../build/pytorch-verify.py) answers the harder
+question — 11 checks, each comparing GPU output against a CPU reference
+([full output](../bench/results/2026-09-11-pytorch-correctness.txt)):
+
+| Check | max abs error |
+| --- | ---: |
+| exp/tanh/sigmoid chain | 1.19e-07 |
+| sum over 4M elements | 6.10e-04 |
+| mean/var | 2.38e-07 |
+| argmax parity | **0** (exact) |
+| softmax | 1.49e-08 |
+| layer_norm | 7.15e-07 |
+| `scaled_dot_product_attention` | 3.28e-07 |
+| conv net forward, 8 layers | 2.32e-07 |
+| **backward pass (autograd)** | 5.22e-07 |
+| fp16 matmul | 5.01e-02 |
+| **bf16 matmul** | 3.96e-01 |
+
+Two of those are worth calling out. **Autograd works**, so training is possible
+in principle and not just inference. And **bf16 works**, which was not assumed —
+it is the more useful reduced-precision format for ML work than fp16.
+
+### What does not work: `torch._int_mm`
+
+int8 × int8 → int32 matrix multiply, used by quantized inference paths. On ROCm
+it goes through hipBLASLt, and it fails with:
+
+```
+rocblaslt error: Cannot read
+  torch/lib/hipblaslt/library/TensileLibrary_lazy_gfx900.dat: No such file
+RuntimeError: HIPBLAS_STATUS_INVALID_VALUE when calling hipblasLtMatmulAlgoGetHeuristic
+```
+
+Structurally the same problem this repo solves for rocBLAS by copying kernel
+files out of ROCm 6.3.4 — except no such file exists to copy. TheRock excludes
+hipBLASLt for gfx900 and gfx90c entirely, so int8 quantization is out of reach
+rather than merely unpackaged. fp16 and bf16 are unaffected.
+
 rocRAND passing matters beyond itself. [Issue #1](https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/issues/1)
 reported it blocked on gfx900 under modular ROCm, where its kernels ship in a
 `.kpack` container — but the wheel bundles its own, so that packaging never
@@ -151,5 +191,4 @@ real numbers back would be welcome.
 - fp16/bf16 throughput beyond the smoke test's single matmul
 - `torch.compile` / Triton on this target
 - Multi-process or multi-GPU anything
-- INT8 paths needing hipBLASLt — TheRock excludes hipBLASLt for both gfx900 and
-  gfx90c, so `torch._int_mm` is likely unavailable
+- INT8 paths needing hipBLASLt — confirmed unavailable, see above

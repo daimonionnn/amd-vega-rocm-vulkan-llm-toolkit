@@ -6,3 +6,4 @@
 !patches/
 !build/apply-patches.sh
 !build/pytorch-smoke.py
+!build/pytorch-verify.py

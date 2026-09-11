@@ -1,0 +1,42 @@
+PyTorch correctness on Vega 8 (gfx90c via gfx900), 2026-09-11.
+Image: build/Dockerfile.pytorch-rocm63-vega + build/pytorch-verify.py
+torch 2.7.0+rocm6.3, HIP 6.3.42131. Every check compares GPU output against a
+CPU reference computed from the same inputs.
+
+  PASS  exp/tanh/sigmoid chain             max abs 1.19e-07  max rel 1.87e-07
+  PASS  sum over 4M elements               max abs 6.10e-04  max rel 8.59e-07
+  PASS  mean/var (dim=1)                   max abs 2.38e-07  max rel 2.06e-03
+  PASS  argmax parity                      max abs 0.00e+00  max rel 0.00e+00
+  PASS  softmax dim=-1                     max abs 1.49e-08  max rel 4.75e-07
+  PASS  layer_norm                         max abs 7.15e-07  max rel 4.48e-03
+  PASS  scaled_dot_product_attention       max abs 3.28e-07  max rel 2.71e-02
+  PASS  conv net forward (8 layers)        max abs 2.32e-07  max rel 1.56e-04
+  PASS  backward pass (conv1 grads)        max abs 5.22e-07  max rel 2.79e-03
+  PASS  fp16 matmul                        max abs 5.01e-02  (reduced precision)
+  PASS  bf16 matmul                        max abs 3.96e-01  (reduced precision)
+  INFO  torch._int_mm unavailable
+
+ALL CORRECTNESS CHECKS PASSED
+
+torch._int_mm — why it fails
+----------------------------
+  rocblaslt error: Cannot read
+    torch/lib/hipblaslt/library/TensileLibrary_lazy_gfx900.dat: No such file
+  RuntimeError: HIPBLAS_STATUS_INVALID_VALUE when calling
+    hipblasLtMatmulAlgoGetHeuristic
+
+A missing Tensile library for hipBLASLt — structurally the same problem this
+repo solves for rocBLAS by copying files out of ROCm 6.3.4. The difference is
+that no such file exists to copy: TheRock excludes hipBLASLt for gfx900 and
+gfx90c entirely (upstream ROCm/TheRock#1062), so int8 quantized paths are out
+of reach rather than merely unpackaged.
+
+Notes
+-----
+Autograd works, so training is possible in principle, not only inference.
+bf16 works, which was not assumed — it is the more useful reduced-precision
+format for ML work than fp16.
+
+Relative error looks alarming on the reduced-precision rows (3.2e+02) and is
+not: it is computed against near-zero reference elements, where any absolute
+error divides badly. The absolute errors are what matter there.
