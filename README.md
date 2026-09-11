@@ -288,6 +288,7 @@ bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192
 
 | Doc                                                | Contents                                                            |
 | -------------------------------------------------- | ------------------------------------------------------------------- |
+| [docs/VEGA8-VS-VEGA10.md](docs/VEGA8-VS-VEGA10.md) | gfx90c vs gfx900 — where "the same chip" stops being true |
 | [docs/JOURNAL.md](docs/JOURNAL.md)                 | **How this project was built** — the chronology, and what it believed that turned out false |
 | [docs/benchmarks.md](docs/benchmarks.md)           | Full benchmark results — ROCm Docker, Vulkan native, LM Studio, CPU |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common errors, Docker ROCm workaround, diagnostic commands          |
