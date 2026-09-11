@@ -1,17 +1,19 @@
-# EXPERIMENT — DO NOT USE. Froze the host twice, 2026-09-11.
+# torch 2.11.0+rocm7.2 on gfx900 — USABLE, with one caveat. 2026-09-11.
 #
-# Root cause found on a third, traced run: the autograd BACKWARD PASS triggers
-# "Memory access fault by GPU node-1" — a deterministic invalid GPU address.
-# Forward passes work. See bench/results/torch211-trace/.
+# Injecting the 128 gfx900 rocBLAS files from ROCm 6.3.4 is enough for
+# essentially all of PyTorch: a 20-op sweep across pooling, upsampling,
+# normalisation, activations, indexing, sorting, linear algebra and transposed
+# convolution is correct, and so is non-convolution backward.
 #
-# Result: torch 2.11.0+rocm7.2 with the 128 gfx900 rocBLAS files injected passes
-# the smoke test and a pointwise-ops test on a freshly booted GPU. But running
-# build/pytorch-verify.py (attention, a conv net, a backward pass, fp16/bf16)
-# hard-froze the whole machine on BOTH attempts — once with the CPU boost
-# overclock enabled, once with it disabled. The same verification passes all 11
-# checks on torch 2.7.0+rocm6.3. Use build/Dockerfile.pytorch-rocm63-vega.
+# THE CAVEAT: MIOpen's convolution BACKWARD faults on gfx900 ("Memory access
+# fault by GPU") for some shapes, and froze the host twice. Which shapes depends
+# on the algorithm MIOpen picks, not on stride. So:
 #
-# Kept rather than deleted so nobody repeats the experiment unknowingly.
+#   inference (torch.no_grad, ComfyUI, generation) -> leave MIOpen on, works
+#   training                                        -> torch.backends.cudnn.enabled = False
+#
+# The workaround makes convolutions about 3x slower. See
+# bench/results/torch211-trace/README.md and docs/PYTORCH.md.
 #
 # Original rationale follows.
 #

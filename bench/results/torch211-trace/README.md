@@ -45,3 +45,87 @@ a fault that the higher one could not.
 `torch 2.7.0+rocm6.3` passes the identical backward pass (see
 [`2026-09-11-pytorch-correctness.txt`](../2026-09-11-pytorch-correctness.txt)).
 The bug is specific to the newer stack.
+
+
+---
+
+## Follow-up the same day: isolated, worked around, and swept
+
+### It is MIOpen's convolution backward — not stride 2, not the tuning database
+
+Each backward component run in its own process ([`isolate.py`](isolate.py),
+[`isolate.log`](isolate.log)):
+
+| Backward pass | Result |
+| --- | --- |
+| ReLU | pass |
+| Linear (rocBLAS) | pass |
+| BatchNorm (MIOpen) | pass |
+| Conv2d stride 1, 3→32, 8×32×32 | pass |
+| **Conv2d stride 2, 32→64, 8×32×32** | **fault** |
+
+That first read as "stride 2". It is not. A later cost measurement ran MIOpen's
+backward on a **stride-1** conv at a larger size (64→128, 16×64×64) and **froze
+the host** — with the hardware at stock clocks by then, so unambiguously
+software. The script had no trace, so it is not proven that the freeze was the
+backward rather than the forward; but MIOpen forward at that exact size was
+re-run afterwards and works, which leaves the backward. The trigger is **which
+algorithm MIOpen selects**, and that depends on shape and size, not stride.
+
+The obvious suspect — the `gfx900_56.db.txt` tuning database shipped in this
+wheel, tuned for a 56-CU Vega 56 rather than this 8-CU APU — was tested and is
+**not** the cause: disabling it
+(`MIOPEN_DEBUG_DISABLE_FIND_DB=1 MIOPEN_FIND_MODE=1`) still faults
+([`fix.py`](fix.py), [`fix.log`](fix.log)).
+
+### The workaround, and what it costs
+
+`torch.backends.cudnn.enabled = False` makes PyTorch use its native convolution
+instead of MIOpen. With it, the full verification passes **9/9 including the
+backward pass**, zero GPU resets ([`trace-no-miopen.log`](trace-no-miopen.log)).
+
+It is not free. Convolution forward, measured without ever running MIOpen's
+backward ([`convcost.py`](convcost.py), [`convcost.log`](convcost.log)):
+
+| Conv forward | MIOpen | native | |
+| --- | ---: | ---: | --- |
+| 3→32, 16×64×64 | 0.52 ms | 1.64 ms | 3.2× slower |
+| 64→128, 16×64×64 | 5.75 ms | 15.51 ms | 2.7× slower |
+
+MIOpen forward is correct and fast, so the workaround only earns its cost where
+the backward pass is needed:
+
+- **Inference** (ComfyUI, generation, anything `torch.no_grad()`): leave MIOpen
+  **on**. No workaround needed.
+- **Training**: set `torch.backends.cudnn.enabled = False` and accept roughly 3×
+  slower convolutions.
+
+### Nothing else found
+
+20 ops across 9 categories, default settings with MIOpen enabled, each category
+in its own process and checked against CPU ([`sweep.py`](sweep.py),
+[`sweep.log`](sweep.log)):
+
+| Category | Ops | Result |
+| --- | --- | --- |
+| pooling | max, avg, adaptive avg | pass, exact |
+| upsampling | nearest, bilinear | pass, exact |
+| normalisation | group_norm, instance_norm | pass |
+| activations | gelu, silu, mish, leaky_relu | pass |
+| indexing | embedding, gather | pass, exact |
+| sort / scan | cumsum, sort, topk | pass |
+| linear algebra | bmm, einsum | pass, exact |
+| backward (non-conv) | linear + cross-entropy | pass |
+| **transposed conv** | conv_transpose2d | **pass** |
+
+The last row matters: `conv_transpose2d` is implemented with MIOpen's
+backward-data kernels, which is why it was run last and expected to fail. It
+works — confirming the fault is specific algorithm selections, not MIOpen's
+backward paths as a whole. It is also what VAE decoders in diffusion pipelines
+use.
+
+### Hardware state for all of the above
+
+The iGPU overclock and CPU Curve Optimizer were disabled before the sweep and
+cost measurement; the iGPU was confirmed at its stock **2000 MHz** under load via
+`pp_dpm_sclk`. Every fault recorded after that point is software.

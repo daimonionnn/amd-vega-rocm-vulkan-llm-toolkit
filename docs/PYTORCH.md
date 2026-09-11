@@ -54,33 +54,42 @@ This mirrors the system packages: ROCm 6.3.4 is the last release whose libraries
 carry consumer gfx9 device code at all. See
 [the package survey](../bench/results/2026-09-10-rocm-gfx900-library-survey.tsv).
 
-### Do not use a newer wheel — tried, and it froze the machine
+### A newer wheel works — for inference as-is, for training with one switch
 
-`torch 2.11.0+rocm7.2` can be made to *start*: inject the 128 gfx900 rocBLAS
-files from ROCm 6.3.4 and it passes the smoke test, and a test of basic
-pointwise ops (`add`, `mul`, `exp`, `clamp`, `tanh`, `sigmoid`) on a freshly
-booted GPU. So PyTorch's ATen kernels *are* compiled for gfx900 — the rocBLAS
-files were the only missing piece for simple work.
+`torch 2.11.0+rocm7.2` ships no gfx900 kernels, but injecting the 128 gfx900
+rocBLAS files from ROCm 6.3.4 makes nearly all of it work: a
+[20-op sweep](../bench/results/torch211-trace/README.md) across pooling,
+upsampling, normalisation, activations, indexing, sorting, linear algebra and
+transposed convolution is correct against the CPU, and so is backward through
+non-convolution layers. [`build/Dockerfile.pytorch-rocm72-vega`](../build/Dockerfile.pytorch-rocm72-vega)
+does the injection.
 
-But the full verification **hard-froze the entire machine twice** with the iGPU
-at 2400 MHz. A third run, at the user's request and with the iGPU at 2300 MHz,
-logged every step to disk before running it — and found the culprit:
+**One thing is broken: MIOpen's convolution backward.** For some shapes it makes
+the GPU access an invalid address:
 
 ```
-BEGIN backward pass
 Memory access fault by GPU node-1 on address 0x7ab6d7023000
 ```
 
-**torch 2.11's autograd backward pass makes the GPU access an invalid address.**
-Forward passes are fine, including attention and a conv net. That is a software
-bug, and a deterministic one — not the scattered corruption a marginal clock
-causes. At 2300 MHz it killed one process with no GPU reset; at 2400 MHz the
-same workload froze the host. See
-[the trace](../bench/results/torch211-trace/README.md). The identical backward
-pass succeeds on 2.7.0. [`build/Dockerfile.pytorch-rocm72-vega`](../build/Dockerfile.pytorch-rocm72-vega)
-is kept, marked, so nobody repeats it unknowingly.
+— and it froze the host twice before being isolated. Which shapes fail depends
+on the algorithm MIOpen selects, not on stride: a small stride-2 conv faulted,
+and so, it appears, did a larger stride-1 one. Disabling MIOpen's tuning
+database does not help.
 
-**Stay on `torch 2.7.0+rocm6.3`.**
+So:
+
+| Workload | Setting | Cost |
+| --- | --- | --- |
+| **Inference** — ComfyUI, generation, anything under `torch.no_grad()` | none; leave MIOpen on | none |
+| **Training** | `torch.backends.cudnn.enabled = False` | convolutions ~3× slower |
+
+The workaround makes PyTorch use its native convolution instead of MIOpen, and
+with it the full verification passes 9/9 including the backward pass. The cost
+is real — conv forward goes from 5.75 ms to 15.51 ms at 64→128 channels,
+16×64×64 — which is why it is worth applying only when you need gradients.
+
+`torch 2.7.0+rocm6.3` has no such fault and needs neither the injection nor the
+switch. Prefer it unless you need something from a newer PyTorch.
 
 ### After a GPU hang, reboot — a driver reset is not enough
 
