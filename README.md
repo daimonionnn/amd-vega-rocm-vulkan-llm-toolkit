@@ -288,6 +288,7 @@ bash run/run-rocm7-baremetal.sh /path/to/model.gguf -ngl 99 -c 8192
 
 | Doc                                                | Contents                                                            |
 | -------------------------------------------------- | ------------------------------------------------------------------- |
+| [docs/PYTORCH.md](docs/PYTORCH.md)                 | **PyTorch on this APU** — working recipe, why ROCm 6.3, ComfyUI prospects |
 | [docs/VEGA8-VS-VEGA10.md](docs/VEGA8-VS-VEGA10.md) | gfx90c vs gfx900 — where "the same chip" stops being true |
 | [docs/JOURNAL.md](docs/JOURNAL.md)                 | **How this project was built** — the chronology, and what it believed that turned out false |
 | [docs/benchmarks.md](docs/benchmarks.md)           | Full benchmark results — ROCm Docker, Vulkan native, LM Studio, CPU |
