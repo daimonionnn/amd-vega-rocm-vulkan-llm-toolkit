@@ -136,6 +136,39 @@ here that would not transfer:
   context. The register file is per-CU, so the mechanism carries; the magnitude
   will not.
 
+## If you wanted a native gfx90c ROCm
+
+TheRock defines the target, so this is buildable in principle, and it is the
+principled fix for everything above: no `HSA_OVERRIDE_GFX_VERSION=9.0.0`, no
+Tensile files copied out of 6.3.4. It has not been attempted here, and as of
+2026-09-12 there is no good reason to:
+
+- **Nothing is published.** AMD's nightly index carries gfx900, gfx906, gfx908,
+  gfx90a, gfx90X-dcgpu, gfx94X, gfx950 and the RDNA families; `gfx90c`,
+  `gfx90c-igpu` and `igpu-all` all return 404. It is a from-source build or
+  nothing.
+- **It unlocks nothing new.** gfx90c carries the same exclusion list as gfx900 —
+  hipBLASLt, hipSPARSELt, composable_kernel, rocWMMA, hipTensor,
+  rocprofiler-compute — so INT8 `torch._int_mm` and composable-kernel flash
+  attention stay out of reach on either target.
+- **Expect no speed.** ROCm 7.14 against 7.2, measured here back to back, was
+  noise in 11 of 12 cells and 8 % *worse* in the twelfth. A gfx90c rocBLAS would
+  also need Tensile kernels generated for it, untuned for 8 CUs. The gain would
+  be architectural — no substitution step, and a road to newer ROCm and
+  PyTorch — not throughput.
+- **The cost is a night.** A full from-source ROCm build — LLVM, comgr, HIP,
+  rocBLAS with kernel generation — on eight cores, plus tens of GB of disk.
+
+If it is ever picked up: build it in a container with
+`-DTHEROCK_AMDGPU_FAMILIES=gfx90c-igpu`, make `rocminfo` and `test-backend-ops`
+the first milestone rather than benchmarks, and ask
+[mixa3607](https://github.com/mixa3607/ML-gfx906) beforehand whether their
+pipeline can emit gfx90c — one question instead of a night of compiling.
+
+Reasons to reopen it: AMD starts publishing gfx90c builds, mixa3607 confirms
+their pipeline retargets, or something forces this machine past
+`torch 2.7.0+rocm6.3` and into the MIOpen conv-backward fault.
+
 ## Known unknowns
 
 - Whether `patches/0001` helps as much on a discrete Vega10. This APU is
