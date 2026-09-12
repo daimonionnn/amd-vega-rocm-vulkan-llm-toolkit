@@ -223,6 +223,23 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#docker-rocm-624-workaround
 - `rocBLAS` 7.x ships without `gfx900` tensile GEMM kernels — so large-matrix multiply falls back to a slow reference path or fails entirely.
 - **Fix:** copy the prebuilt `gfx900` `.co` kernel files **and `TensileLibrary_lazy_gfx900.dat`** from the ROCm **6.3.4** `rocblas` package into ROCm 7's library directory. rocBLAS probes that directory at runtime and picks them up automatically. The lazy `.dat` index file is essential — without it ROCm 7 crashes on the first GEMM with `Illegal seek for GPU arch: gfx900`.
 
+**The kernels are published, so you need not dig them out of a 2024 `.deb` yourself:**
+
+```bash
+# 128 gfx900 Tensile files from the ROCm 6.3.4 rocblas package, ~9 MB
+wget https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/releases/download/rocblas-gfx900-6.3.4/rocblas-gfx900-6.3.4.tar.gz
+tar xzf rocblas-gfx900-6.3.4.tar.gz
+sudo cp rocblas-gfx900-6.3.4/library/* /opt/rocm/lib/rocblas/library/
+```
+
+The tarball records which package version it came from and carries per-file checksums.
+[`build/package-gfx900-kernels.sh`](build/package-gfx900-kernels.sh) rebuilds it from AMD's
+repository, verifying the `.deb` against that repository's own index before extracting
+anything. The build paths below fetch the files themselves, so this download is for anyone
+who wants the kernels without the rest of this repo — a discrete Vega 10 included, where no
+`HSA_OVERRIDE_GFX_VERSION` is needed. It is for **classic ROCm 7.0–7.2**; see
+[docs/BUILD.md](docs/BUILD.md#the-gfx900-kernels-prepackaged) for what it does not fit.
+
 #### Option A — Docker (recommended)
 
 ```bash

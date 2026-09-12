@@ -149,6 +149,37 @@ ROCm 7.x dropped official gfx900 support, but llama.cpp can still be built and r
 
 **Key fix:** `TensileLibrary_lazy_gfx900.dat` must be present — ROCm 7 looks up this lazy index file first at runtime. Without it, inference crashes with `rocBLAS error: Cannot read TensileLibrary.dat: Illegal seek for GPU arch: gfx900`. The Dockerfile multi-stage build installs rocBLAS into a `rocm/dev-ubuntu-22.04:6.3.4` stage and copies the file across.
 
+### The gfx900 kernels, prepackaged
+
+Both build paths below fetch the 6.3.4 kernels on their own, so nothing here needs this.
+It exists because the files are useful without the rest of the repo — on a discrete Vega 10,
+or in any other ROCm 7 install — and digging them out of AMD's 2024 `.deb` is the step
+everyone repeats.
+
+```bash
+wget https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/releases/download/rocblas-gfx900-6.3.4/rocblas-gfx900-6.3.4.tar.gz
+tar xzf rocblas-gfx900-6.3.4.tar.gz
+sudo cp rocblas-gfx900-6.3.4/library/* /opt/rocm/lib/rocblas/library/
+ls /opt/rocm/lib/rocblas/library/ | grep -c gfx900     # expect 128
+```
+
+The tarball carries a README naming the exact source package and its SHA256, plus
+per-file checksums in `MANIFEST.sha256`. Regenerate it with
+[`build/package-gfx900-kernels.sh`](../build/package-gfx900-kernels.sh), which downloads
+the package from `repo.radeon.com`, verifies it against the repository's `Packages` index,
+and fails if `TensileLibrary_lazy_gfx900.dat` is absent — a set without that index file
+looks complete and dies at the first GEMM.
+
+**Where it fits:**
+
+| | |
+| --- | --- |
+| Classic ROCm 7.0–7.2 | ✅ what this is for; tested on 7.2.0 |
+| gfx900 (discrete Vega 10) | ✅ no override needed |
+| gfx90c (Vega 8 and other APU iGPUs) | ✅ with `HSA_OVERRIDE_GFX_VERSION=9.0.0` |
+| AMD modular packages (`amdrocm-core` 7.13+) | ❌ their ROCr rejects the gfx version override |
+| ROCm 7.14 | ❌ needs the newer-format Tensile files from AMD's 7.14 gfx900 wheel — see [the 7.14 write-up](../bench/results/2026-09-11-rocm714-working.md) |
+
 ### Docker (containerized alternative)
 
 ```bash

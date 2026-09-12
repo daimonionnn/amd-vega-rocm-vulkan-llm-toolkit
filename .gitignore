@@ -1,5 +1,6 @@
 # Build artifacts and external clones
 llm/
+dist/
 
 # Model files (do not commit huge binaries)
 *.gguf
