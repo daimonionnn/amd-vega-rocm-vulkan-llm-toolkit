@@ -282,6 +282,17 @@ by then" — but the overclock had been removed *after* that freeze, not before 
 The conclusion survived, on other evidence; the stated reason did not. Getting
 the order of events wrong is attribution without isolation too.
 
+It happened twice more in September, in prose rather than in measurements. The
+ROCm 6.3.4 kernel files were written up as "the wrong format for 7.14 — mixing
+them in aborts at the first GEMM" on the strength of having seen 7.14 lay its
+rocBLAS library out per architecture; the abort itself was never observed, and
+issue #1 reports those files working there. The ML-gfx906 pipeline was written
+up as "parameterised by `ROCM_ARCH`" on the strength of it being split into
+per-component directories; no such variable appears in its build workflow. Both
+have the shape of the BIOS entry above: a mechanism that *was* seen, extended
+into a conclusion that was not. Documentation prose invites this more than a
+benchmark table does — a sentence, unlike a column, never has to show a number.
+
 ### 5. Measuring the damage instead of the software
 
 After one GPU hang, four more tests were run against a GPU the driver had reset
