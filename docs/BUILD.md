@@ -177,8 +177,8 @@ looks complete and dies at the first GEMM.
 | Classic ROCm 7.0–7.2 | ✅ what this is for; tested on 7.2.0 |
 | gfx900 (discrete Vega 10) | ✅ no override needed |
 | gfx90c (Vega 8 and other APU iGPUs) | ✅ with `HSA_OVERRIDE_GFX_VERSION=9.0.0` |
-| AMD modular packages (`amdrocm-core` 7.13+) | ❌ their ROCr rejects the gfx version override |
-| ROCm 7.14 | ❌ needs the newer-format Tensile files from AMD's 7.14 gfx900 wheel — see [the 7.14 write-up](../bench/results/2026-09-11-rocm714-working.md) |
+| AMD modular packages (`amdrocm-core` 7.13+) | ⚠️ an APU problem only: that ROCr rejects `HSA_OVERRIDE_GFX_VERSION`, so gfx90c cannot present as gfx900. A discrete Vega 10 needs no override — [issue #1](https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/issues/1) did exactly this |
+| ROCm 7.14 | ❓ untested here — its rocBLAS uses a per-architecture `library/gfx900/` layout, and [the 7.14 work here](../bench/results/2026-09-11-rocm714-working.md) used AMD's own 7.14-built kernels. [Issue #1](https://github.com/daimonionnn/amd-vega-rocm-vulkan-llm-toolkit/issues/1) reports these 6.3.4 files working under modular 7.14.1 |
 
 ### Docker (containerized alternative)
 

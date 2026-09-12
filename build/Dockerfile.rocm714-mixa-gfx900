@@ -16,8 +16,10 @@
 # (lib/rocblas/library/<arch>/), so the gfx900 directory drops straight in.
 #
 # Note this is NOT the ROCm 6.3.4 backport used elsewhere in this repo: these
-# kernels are built for 7.14 by AMD. The 6.3.4 files do not work here — the
-# Tensile format changed between 7.2 and 7.14.
+# kernels are built for 7.14 by AMD. Whether the 6.3.4 files would also work on
+# 7.14 was never tested here — 7.14 lays rocBLAS out per architecture where 6.3.4
+# and 7.2 use one flat directory — and issue #1 reports them working under AMD's
+# modular rocBLAS 7.14.1.
 
 # ── Stage 1: lift the gfx900 Tensile kernels out of AMD's wheel ───────────────
 FROM python:3.12-slim AS kernels
