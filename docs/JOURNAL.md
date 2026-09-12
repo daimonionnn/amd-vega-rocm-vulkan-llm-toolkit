@@ -238,7 +238,7 @@ with CPU and APU from the same session.
 
 ## What kept going wrong
 
-Five patterns account for nearly every correction above. They are worth more
+Six patterns account for nearly every correction above. They are worth more
 than the chronology.
 
 ### 1. Silent fallback to the CPU, by three different routes
@@ -291,6 +291,26 @@ known-good PyTorch was broken as well.
 **The lesson:** when a result is surprising, check that the instrument still
 works before believing the measurement. Here that means a reboot and a known-good
 control as the first job, before anything else.
+
+### 6. A check that was never checked
+
+The CI workflow added on 2026-09-10 failed on its first run and on 24 of its 25
+runs after it, and nothing said so loudly enough to notice. It had been written
+against the repo rather than run against it: shellcheck had twelve findings in
+six scripts from the start, and the docs job could not resolve seven links,
+because the logs they point at are `*.log` and `.gitignore` excludes those, so
+they had never been committed.
+
+Two things made that worse than a red badge. The shell job stops at its first
+failing step, so the third check — the guard against `| grep -q` — never ran at
+all; when it finally did, its comment filter turned out to be anchored at the
+start of the line, where `grep -n` output, prefixed `file:line:`, can never
+match. And the link checker passed locally the whole time, because it asked
+whether a path exists on this disk, not whether it is published.
+
+**The lesson:** a guard is not in place until it has been seen to pass, and seen
+to fail on the thing it guards against. From outside, a check that never ran and
+a check that cannot fail look exactly the same.
 
 ### And one that worked
 
