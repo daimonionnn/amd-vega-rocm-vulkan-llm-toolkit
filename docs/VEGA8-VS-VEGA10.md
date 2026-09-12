@@ -108,7 +108,10 @@ reached through the override. That gap is widening:
 - TheRock still *defines* both `gfx900` and `gfx90c` as build targets, with
   identical exclusion lists (hipBLASLt, hipSPARSELt, composable_kernel, rocWMMA,
   hipTensor, rocprofiler-compute), so they can be built even though they are not
-  shipped.
+  shipped. Only gfx900 is actually published: AMD's nightly index carries
+  gfx900, gfx906, gfx908, gfx90a and the RDNA families, while `gfx90c`,
+  `gfx90c-igpu` and `igpu-all` return 404 (checked 2026-09-12). For gfx90c a
+  ROCm exists as a build target, not as a download.
 - `torch 2.7.0+rocm6.3` is the last stock PyTorch wheel carrying gfx900 kernels.
 - **But ROCm 7.14 does run here** — mixa3607's TheRock build plus the gfx900
   Tensile files lifted out of AMD's own (unusable) wheel, verified with
