@@ -142,9 +142,10 @@ ROCm 7 reads that index first, and without it the first GEMM fails with
 ## What this works with
 
 - **Classic ROCm 7.0–7.2.** Tested on 7.2.0.
-- **Not AMD's modular packages** (\`amdrocm-core\` 7.13+). Their ROCr rejects
-  \`HSA_OVERRIDE_GFX_VERSION\`, so an APU cannot present itself as gfx900 there. A discrete Vega 10 needs no
-  override, and issue #1 reports these files working on one under modular 7.14.1.
+- **AMD's modular packages: an APU problem only.** Their ROCr rejects
+  \`HSA_OVERRIDE_GFX_VERSION\`, so gfx90c cannot present itself as gfx900 there.
+  A discrete Vega 10 needs no override at all, and issue #1 reports these files
+  working on one under modular rocBLAS 7.14.1.
 - **ROCm 7.14: untested here.** Its rocBLAS lays the library out per
   architecture (\`library/gfx900/\`) where 6.3.4 and 7.2 use one flat directory,
   and the 7.14 work in this repo used AMD's own 182 gfx900 files from their 7.14
@@ -152,7 +153,7 @@ ROCm 7 reads that index first, and without it the first GEMM fails with
   modular rocBLAS 7.14.1 on a discrete Vega 10.
 
 On an APU, export \`HSA_OVERRIDE_GFX_VERSION=9.0.0\` so gfx90c loads the gfx900
-kernels. A discrete Vega 10 needs no override.
+kernels.
 
 ## License
 
