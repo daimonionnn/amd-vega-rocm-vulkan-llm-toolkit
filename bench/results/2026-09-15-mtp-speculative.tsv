@@ -1,0 +1,28 @@
+# MTP (multi-token prediction) speculation on the Vega 8 iGPU, 2026-09-15.
+#
+# Instrument: llama-server + /v1/chat/completions, NOT llama-bench, because
+# llama-bench has no speculative-decoding support at all (no --spec-type flag).
+# docs/benchmarks.md warns that the server harness cannot resolve a few percent;
+# the effects here are 5-38 %, and the two repeats of every cell agree to ~1 %,
+# so the instrument is adequate for this question and for nothing finer.
+#
+# Method: ROCm 7.2 baremetal, -ngl 99 -c 8192 -fa on -np 1, iGPU at 2400 MHz.
+# One fixed prompt of ~1500 tokens, 256 tokens generated, temperature 0, no
+# prompt cache. Each configuration run twice, whole server restarted each time.
+# Draft counts are identical across repeats (temperature 0), so acceptance is
+# deterministic for this prompt.
+#
+# n_max        --spec-draft-n-max; "off" = no --spec-type flag at all
+# accept       draft_n_accepted / draft_n, from the server's own timings
+# mean_len     mean accepted run length, from the server log
+#
+model	quant	params	n_max	prefill_1	prefill_2	decode_1	decode_2	accept	mean_len
+Qwen3.5-9B-MTP	Q4_K_S	9B dense	off	103.2	103.3	10.95	10.91	-	-
+Qwen3.5-9B-MTP	Q4_K_S	9B dense	2	98.2	98.9	10.42	10.33	0.70	2.35
+Qwen3.5-9B-MTP	Q4_K_S	9B dense	3	98.8	98.9	8.07	8.07	0.61	-
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_S	35B MoE / 3B active	off	146.9	147.9	16.20	16.50	-	-
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_S	35B MoE / 3B active	2	142.5	143.4	22.57	22.59	0.85	2.70
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_S	35B MoE / 3B active	3	142.7	142.8	20.99	20.98	0.75	3.23
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_M	35B MoE / 3B active	off	132.7	132.2	15.65	16.26	-	-
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_M	35B MoE / 3B active	2	129.0	126.7	18.70	18.98	0.66	-
+Qwen3.6-35B-A3B-MTP	UD-Q4_K_M	35B MoE / 3B active	3	128.9	127.4	17.53	17.48	0.59	-

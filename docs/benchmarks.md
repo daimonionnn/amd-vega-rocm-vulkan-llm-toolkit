@@ -432,6 +432,59 @@ re-streamed by all 8 of its Q heads — plus the V cache, which cannot be quanti
 FA. Neither is reachable with a flag; both needed the flash-attention kernel fixed, which
 `patches/0001` did.
 
+### MTP speculation — +38 % decode on the MoE, a loss on a dense model
+
+`--spec-type draft-mtp` uses the multi-token-prediction head built into an `-MTP` GGUF:
+the model drafts its own next tokens and verifies them in one batched pass, with no second
+model to load and no extra weights in memory. The pinned llama.cpp supports it
+([PR #22673](https://github.com/ggml-org/llama.cpp/pull/22673), merged 2026-05-16).
+Measured 2026-09-15 — raw data, method and caveats in
+[`2026-09-15-mtp-speculative.tsv`](../bench/results/2026-09-15-mtp-speculative.tsv):
+
+| Model | Quant | `-n-max` | decode t/s | vs off | acceptance |
+| --- | --- | --- | ---: | ---: | ---: |
+| Qwen3.5-9B — **dense** | Q4_K_S | off | 10.93 | — | — |
+| | | 2 | 10.38 | **−5 %** | 70 % |
+| | | 3 | 8.07 | **−26 %** | 61 % |
+| Qwen3.6-35B-A3B — **MoE** | UD-Q4_K_S | off | 16.35 | — | — |
+| | | **2** | **22.58** | **+38 %** | 85 % |
+| | | 3 | 20.99 | +28 % | 75 % |
+| Qwen3.6-35B-A3B — **MoE** | UD-Q4_K_M | off | 15.96 | — | — |
+| | | 2 | 18.84 | +18 % | 66 % |
+| | | 3 | 17.51 | +10 % | 59 % |
+
+Prefill pays 3–5 % in every configuration — the head's device-to-host embedding transfers —
+so this is a decode knob bought with a little prefill, not a free one.
+
+**Why the dense model loses.** MTP trades compute for memory passes: it verifies *k* tokens
+in the traffic of one. That is only a win where decode has bandwidth to spare. The 9B dense
+model reads its whole 5.19 GB of weights per token, which at 10.9 t/s is about **57 GB/s** —
+at or above the ~50 GB/s this DDR4 delivers, so decode is already saturated and the extra
+verification compute has nothing to buy. The MoE reads only its ~3 B active parameters,
+roughly 1.8 GB per token, so 16.4 t/s is about **30 GB/s** — well short of the ceiling, and
+MTP converts that headroom into tokens, reaching roughly 41 GB/s. Those figures are
+arithmetic from file size and active-parameter share, not bandwidth counters; the ratio is
+what matters, not the third digit.
+
+The practical form of that rule: **MTP pays on sparse models, and on this hardware a dense
+model at Q4 is already bandwidth-bound from about 5 GB upward.**
+
+**`-n-max 3` is worse than 2 on every model tested.** More drafted tokens means lower
+acceptance — 61 % against 70 % on the 9B, 75 % against 85 % on the MoE — and every rejected
+token is verification work thrown away. Two is the setting.
+
+**The larger quant gets less, and it is not understood.** UD-Q4_K_M starts 2 % slower than
+UD-Q4_K_S and takes only +18 % from MTP against +38 %, because its acceptance is 66 % rather
+than 85 %. Expecting the more precise quant to *agree with itself* more often was the
+obvious guess and it was wrong. Acceptance measures agreement between the MTP head and the
+body, not quality, so a plausible test is to compare the quantisation types of the
+`blk.40.nextn.*` tensors against the body in both files — untested.
+
+**Instrument.** `llama-bench` has no speculative decoding, so these came from llama-server
+and a fixed prompt, the harness [these notes warn about](#the-server-harness-is-not-an-instrument-for-few-percent-comparisons).
+That warning stands for few-percent questions; here the effects are 5–38 % and both repeats
+of every cell agree to about 1 %, with draft counts identical at temperature 0.
+
 ### Cooling
 
 Two identical 6-backend sweeps, the second after the fan curve was raised:

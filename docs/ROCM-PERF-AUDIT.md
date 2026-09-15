@@ -168,7 +168,7 @@ Score = (expected gain × confidence) / effort. "Test" names the exact command.
 | # | Change | Expected | Constraint |
 |---|---|---|---|
 | 17 | **Draft-free n-gram speculation** (`--spec-type ngram-mod --spec-ngram-mod-n-max 3 --spec-ngram-mod-n-min 1`) | decode +10-40 % on code/edits/JSON, ~0 on prose | Verify batch **must stay ≤ 4 tokens** on the 35B: `get_mmvq_mmid_max_batch_gcn` = 4 for Q4_K/Q6_K, above that experts drop to MMQ. The defaults (n_max 64) would turn every verify into a prefill. 35B also pays a ~60 MiB recurrent-state checkpoint per drafted step. |
-| 18 | **MTP-head speculation** (`--spec-type draft-mtp --spec-draft-n-max 3`) on the MTP GGUF | decode +25-50 % at α ≥ 0.6 | Needs the `-MTP` GGUF (unsloth Qwen3.6-35B-A3B-MTP is partly downloaded — but that is Qwen3.6, so no comparison to the tables). Same ≤ 4 cap. |
+| 18 | **MTP-head speculation** (`--spec-type draft-mtp --spec-draft-n-max 2`) on an MTP GGUF | **Measured 2026-09-15: decode +38 % on the 35B-A3B MoE** (16.35 → 22.58 t/s, acceptance 85 %), +18 % on the same model at UD-Q4_K_M, and **−5 % on a dense 9B** | Done — [the measurements](../docs/benchmarks.md#mtp-speculation--38--decode-on-the-moe-a-loss-on-a-dense-model). `n-max 3` is worse than 2 everywhere; prefill pays 3–5 %; `-np 1` only, and no `--mmproj`. Dense models at Q4 above ~5 GB are already bandwidth-bound and have nothing for it to buy. |
 | 19 | Context-checkpoint density for chat (`-ctxcp 32 -cms 512`) | TTFT on branch/edit from ~40 s to ~5 s | No throughput change; the 30 gated-DeltaNet layers make prefix reuse checkpoint-only. |
 
 ---
