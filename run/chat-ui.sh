@@ -1,57 +1,66 @@
 #!/bin/bash
-# Chat UI with per-turn speed statistics, served by llama-server itself.
+# Serve the chat UI with per-reply speed statistics.
 #
-# llama-server's --path replaces its built-in web UI with a directory of static
-# files, so the page is served from the same origin as the API. That means no
-# CORS configuration, no second web server, and one URL to open.
+# By default this starts NO model. It serves the page and nothing else, and the
+# page talks to whatever llama-server you already have running -- started by
+# run/start-llama-server.sh, by LM Studio's server, by a Docker backend, by hand.
+# The server URL is editable in the page and remembered by the browser.
 #
-# What the page shows, per reply: time to first token, prefill t/s, token
-# generation t/s, prompt/completion token counts, wall time, and -- when the
-# server runs with --spec-type draft-mtp -- the MTP draft acceptance rate.
-# Numbers come from the server's own `timings` object, not from guesses on the
-# client; the client only measures TTFT, which the server cannot see.
+# That works because llama-server answers with Access-Control-Allow-Origin by
+# default (verified 2026-09-15 against a server started with no CORS flags at
+# all: preflight, POST and /props all echo the Origin back), so a page served on
+# one port may call an API on another.
 #
 # Usage:
-#   ./run/chat-ui.sh                          # Vulkan (the default backend)
-#   ./run/chat-ui.sh --rocm                   # ROCm 7.2 baremetal
-#   ./run/chat-ui.sh --cpu
-#   MODEL=/path/to/model.gguf ./run/chat-ui.sh --rocm
-#   ./run/chat-ui.sh --rocm --spec-type draft-mtp --spec-draft-n-max 2
+#   ./run/chat-ui.sh                        # serve the page on :8081, attach to :8080
+#   UI_PORT=9000 ./run/chat-ui.sh           # serve it somewhere else
+#   ./run/chat-ui.sh --with-server --rocm   # also start llama-server, same origin
+#   ./run/chat-ui.sh --with-server --rocm --spec-type draft-mtp --spec-draft-n-max 2
 #
-# Environment: MODEL, CTX, PORT -- same as run/start-llama-server.sh.
+# --with-server passes everything after it to run/start-llama-server.sh and adds
+# `--path ui/`, so llama-server serves the page itself. Convenient for one
+# command; not needed if a server is already up.
 #
-# Then open http://127.0.0.1:${PORT:-8080}
+# Then open http://127.0.0.1:${UI_PORT:-8081}
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 UI_DIR="$REPO_DIR/ui"
+UI_PORT="${UI_PORT:-8081}"
 
 if [ ! -f "$UI_DIR/index.html" ]; then
-    echo "✗  $UI_DIR/index.html is missing — the UI cannot be served" >&2
+    echo "✗  $UI_DIR/index.html is missing — nothing to serve" >&2
     exit 1
 fi
 
 case "${1:-}" in
-    --rocm-docker)
-        # The container has no bind mount for ui/, so --path would point at a
-        # directory that does not exist inside it and llama-server would serve
-        # nothing. The host backends have no such problem.
-        echo "✗  --rocm-docker cannot serve the UI: the container cannot see $UI_DIR" >&2
-        echo "   Use --rocm (baremetal), --vulkan or --cpu instead." >&2
-        exit 1
+    --with-server)
+        shift
+        echo ""
+        echo "  Starting llama-server, which will serve the UI itself."
+        echo "  Chat UI:  http://127.0.0.1:${PORT:-8080}"
+        echo ""
+        exec "$SCRIPT_DIR/start-llama-server.sh" "$@" --path "$UI_DIR"
         ;;
     --help|-h)
-        sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
+        ;;
+    "") : ;;
+    *)
+        echo "✗  Unknown option: $1" >&2
+        echo "   This script serves the page; model flags belong after --with-server." >&2
+        echo "   Try: $0 --help" >&2
+        exit 1
         ;;
 esac
 
 echo ""
-echo "  Chat UI:  http://127.0.0.1:${PORT:-8080}"
-echo "  Stats come from the server's timings; MTP acceptance appears when the"
-echo "  server is started with --spec-type draft-mtp."
+echo "  Chat UI:     http://127.0.0.1:$UI_PORT"
+echo "  Expects a llama-server at http://127.0.0.1:8080 — change it in the page"
+echo "  if yours listens elsewhere. Start one with: ./run/start-llama-server.sh"
 echo ""
 
-exec "$SCRIPT_DIR/start-llama-server.sh" "$@" --path "$UI_DIR"
+exec python3 -m http.server "$UI_PORT" --bind 127.0.0.1 --directory "$UI_DIR"

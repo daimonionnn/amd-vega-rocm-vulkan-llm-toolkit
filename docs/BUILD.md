@@ -259,18 +259,27 @@ export LD_LIBRARY_PATH="$PWD/llm/rocm7-vega/lib:/opt/rocm/lib"
 
 ### Chat UI with speed statistics
 
+The page attaches to a llama-server that is already running — it starts no model of
+its own:
+
 ```bash
-./run/chat-ui.sh --rocm                      # then open http://127.0.0.1:8080
-MODEL=/path/to/model.gguf ./run/chat-ui.sh   # Vulkan, the default backend
-./run/chat-ui.sh --rocm --spec-type draft-mtp --spec-draft-n-max 2
+./run/start-llama-server.sh --rocm     # whatever backend you want, as usual
+./run/chat-ui.sh                       # then open http://127.0.0.1:8081
 ```
 
-[`ui/index.html`](../ui/index.html) is one self-contained page: no build step, no
-dependencies, nothing fetched from the internet. `llama-server --path` serves it in place
-of the built-in web UI, so the page and the API share an origin and no CORS setup is
-needed. [`run/chat-ui.sh`](../run/chat-ui.sh) layers that onto
-[`run/start-llama-server.sh`](../run/start-llama-server.sh), so every backend flag and the
-`MODEL` / `CTX` / `PORT` variables work unchanged.
+`run/chat-ui.sh` only serves [`ui/index.html`](../ui/index.html) as a static file. The page
+talks to `http://127.0.0.1:8080` by default, the URL is editable in the page and remembered
+by the browser, and llama-server sends `Access-Control-Allow-Origin` without being asked
+(verified against a server started with no CORS flags), so the two ports talk happily. Any
+server works: the Vulkan launcher, the Docker backend, one started by hand.
+
+For a single command, `--with-server` starts llama-server with `--path ui/` so it serves
+the page itself, on one origin:
+
+```bash
+./run/chat-ui.sh --with-server --rocm
+./run/chat-ui.sh --with-server --rocm --spec-type draft-mtp --spec-draft-n-max 2
+```
 
 Every reply carries its own measurements:
 
@@ -279,15 +288,20 @@ Every reply carries its own measurements:
 | Time to first token | measured in the browser — the server cannot see it |
 | Prefill t/s, token generation t/s | the server's `timings` object in the final SSE chunk |
 | Prompt and completion tokens, cached prompt tokens | the OpenAI `usage` object |
+| Thinking time | from the first `reasoning_content` delta to the first `content` delta |
 | MTP draft acceptance | `timings.draft_n_accepted / draft_n`, present only when the server runs `--spec-type draft-mtp` |
 
-Only TTFT is computed in the browser; everything else is the server's own accounting
-rather than a guess made from the stream. The side panel keeps session medians and a
-sparkline of decode speed per turn, and **Copy stats as Markdown** puts the session on the
-clipboard as a table.
+Only TTFT and the thinking time are computed in the browser; the rates are the server's own
+accounting rather than a guess made from the stream.
 
-`--rocm-docker` is refused: the container has no bind mount for `ui/`, so `--path` would
-point at nothing.
+**Thinking models are handled explicitly.** Qwen3.5 and 3.6 stream `reasoning_content` for a
+long time before any answer token — 202 chunks of it, with `content` still empty, in the run
+that caught this — so the reasoning goes into a collapsible block that folds itself away, with
+the time spent, once the answer starts. A UI that reads only `content` looks frozen on these
+models.
+
+The side panel keeps session medians and a sparkline of decode speed per turn, and **Copy
+stats as Markdown** puts the session on the clipboard as a table.
 
 ### Standalone llama-server (Default ROCm 7.2 Baremetal)
 

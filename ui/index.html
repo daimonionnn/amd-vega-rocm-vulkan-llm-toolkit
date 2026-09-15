@@ -38,6 +38,12 @@ main{flex:1;display:flex;min-height:0}
 .chip b{color:var(--ink);font-weight:600}
 .chip.acc b{color:var(--good)}
 .chip.slow b{color:var(--warn)}
+details.think{margin:0 0 8px;border-left:2px solid var(--line);padding-left:9px}
+details.think summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none}
+details.think summary::-webkit-details-marker{display:none}
+details.think summary::before{content:"▸ ";}
+details.think[open] summary::before{content:"▾ ";}
+.thinktext{color:var(--muted);font-size:12.5px;white-space:pre-wrap;max-height:260px;overflow:auto;margin-top:6px}
 footer{padding:12px 14px;background:var(--panel);border-top:1px solid var(--line);display:flex;gap:10px}
 #prompt{flex:1;resize:vertical;min-height:48px;max-height:220px}
 h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
@@ -88,20 +94,31 @@ const turns = [];          // one entry per assistant reply
 let history = [];          // chat messages sent to the server
 let controller = null;
 
-$('#server').value = location.origin.startsWith('http') ? location.origin : 'http://127.0.0.1:8080';
+const DEFAULT_SERVER = 'http://127.0.0.1:8080';
+const remembered = (() => { try { return localStorage.getItem('vega-chat-server'); } catch { return null; } })();
+// Served by llama-server itself (--path)? Then this origin is the server. Served
+// as a plain static file? Then fall back to the usual llama-server port.
+$('#server').value = remembered || (location.protocol.startsWith('http') ? location.origin : DEFAULT_SERVER);
 const base = () => $('#server').value.replace(/\/+$/, '');
 
 async function connect() {
-  try {
-    const p = await (await fetch(base() + '/props')).json();
-    const name = (p.model_path || '').split('/').pop() || 'model';
-    const ctx = p.default_generation_settings?.n_ctx ?? p.n_ctx;
-    $('#model').textContent = name + (ctx ? '  ·  ctx ' + ctx : '') + (p.build_info ? '  ·  ' + p.build_info : '');
-    $('#dot').classList.add('on');
-  } catch (e) {
-    $('#model').textContent = 'no server at ' + base();
-    $('#dot').classList.remove('on');
+  const tried = [];
+  for (const url of [base(), DEFAULT_SERVER]) {
+    if (!url || tried.includes(url)) continue;
+    tried.push(url);
+    try {
+      const p = await (await fetch(url + '/props')).json();
+      $('#server').value = url;
+      try { localStorage.setItem('vega-chat-server', url); } catch {}
+      const name = (p.model_path || '').split('/').pop() || 'model';
+      const ctx = p.default_generation_settings?.n_ctx ?? p.n_ctx;
+      $('#model').textContent = name + (ctx ? '  ·  ctx ' + ctx : '') + (p.build_info ? '  ·  ' + p.build_info : '');
+      $('#dot').classList.add('on');
+      return;
+    } catch (e) { /* try the next candidate */ }
   }
+  $('#model').textContent = 'no llama-server at ' + tried.join(' or ');
+  $('#dot').classList.remove('on');
 }
 
 function el(cls, text) { const d = document.createElement('div'); d.className = cls; if (text) d.textContent = text; $('#chat').appendChild(d); return d; }
@@ -118,6 +135,7 @@ function chips(row, t) {
   add('TG', fmt(t.tg, 2) + ' t/s', '');
   add('tokens', t.promptTokens + ' in / ' + t.genTokens + ' out');
   add('total', fmt(t.total / 1000, 2) + ' s');
+  if (t.thinkMs != null) add('thinking', fmt(t.thinkMs / 1000, 1) + ' s');
   if (t.acceptance != null) add('MTP accepted', fmt(t.acceptance * 100, 0) + '%', 'acc');
   if (t.cached) add('cached', t.cached + ' tok');
 }
@@ -154,6 +172,24 @@ async function send() {
   history.push({ role: 'user', content: text });
 
   const bot = el('msg bot', '');
+  const answer = document.createElement('span');
+  bot.appendChild(answer);
+  let thinkBox = null, thinkText = null, thinkStart = null, thinkMs = null;
+  const think = delta => {
+    if (!thinkBox) {
+      // Thinking models (Qwen3.5/3.6 and friends) stream reasoning_content long
+      // before any content. Without this the bubble sits empty and the UI looks
+      // hung -- measured here: 202 chunks of reasoning and no content at all.
+      thinkBox = document.createElement('details');
+      thinkBox.className = 'think'; thinkBox.open = true;
+      const s = document.createElement('summary'); s.textContent = 'Thinking…';
+      thinkText = document.createElement('div'); thinkText.className = 'thinktext';
+      thinkBox.append(s, thinkText); bot.insertBefore(thinkBox, answer);
+      thinkStart = performance.now();
+    }
+    thinkText.textContent += delta;
+    thinkText.scrollTop = thinkText.scrollHeight;
+  };
   const row = el('stats', '');
   $('#chat').scrollTop = $('#chat').scrollHeight;
   $('#send').disabled = true; $('#stop').disabled = false;
@@ -183,11 +219,21 @@ async function send() {
         const payload = line.slice(5).trim();
         if (!payload || payload === '[DONE]') continue;
         let j; try { j = JSON.parse(payload); } catch { continue; }
-        const delta = j.choices?.[0]?.delta?.content;
-        if (delta) {
+        const d = j.choices?.[0]?.delta || {};
+        if (d.reasoning_content) {
           if (ttft === null) ttft = performance.now() - t0;
-          out += delta; chunks++;
-          bot.textContent = out;
+          think(d.reasoning_content);
+          $('#chat').scrollTop = $('#chat').scrollHeight;
+        }
+        if (d.content) {
+          if (ttft === null) ttft = performance.now() - t0;
+          if (thinkBox && thinkMs === null) {        // the answer has started
+            thinkMs = performance.now() - thinkStart;
+            thinkBox.open = false;
+            thinkBox.querySelector('summary').textContent = 'Thought for ' + fmt(thinkMs / 1000, 1) + ' s';
+          }
+          out += d.content; chunks++;
+          answer.textContent = out;
           $('#chat').scrollTop = $('#chat').scrollHeight;
         }
         if (j.timings) timings = j.timings;
@@ -196,7 +242,7 @@ async function send() {
     }
     history.push({ role: 'assistant', content: out });
   } catch (e) {
-    bot.textContent = out + (e.name === 'AbortError' ? '\n\n[stopped]' : '\n\n[error] ' + e.message);
+    answer.textContent = out + (e.name === 'AbortError' ? '\n\n[stopped]' : '\n\n[error] ' + e.message);
   } finally {
     $('#send').disabled = false; $('#stop').disabled = true; controller = null;
   }
@@ -214,6 +260,7 @@ async function send() {
     tg: timings?.predicted_per_second ?? (ttft ? genTokens / ((total - ttft) / 1000) : NaN),
     acceptance: timings?.draft_n ? timings.draft_n_accepted / timings.draft_n : null,
     cached: timings?.cache_n ?? usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    thinkMs: thinkMs ?? (thinkStart ? performance.now() - thinkStart : null),
   };
   chips(row, t); turns.push(t); summarize();
 }

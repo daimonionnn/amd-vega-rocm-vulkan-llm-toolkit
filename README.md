@@ -128,8 +128,8 @@ awk '{print $1/1024/1024" MiB GTT"}' /sys/class/drm/card*/device/mem_info_gtt_to
 # ROCm 7.2 baremetal (working again as of 2026-09-07 — classic ROCm 7.2 host)
 ./run/start-llama-server.sh --rocm
 
-# Chat UI with per-turn speed statistics — open http://127.0.0.1:8080
-./run/chat-ui.sh --rocm
+# Chat UI with per-reply speed statistics — attaches to the server above
+./run/chat-ui.sh                 # serves the page on http://127.0.0.1:8081
 
 # API endpoint: http://127.0.0.1:8080/v1
 curl http://127.0.0.1:8080/v1/chat/completions \
@@ -157,7 +157,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 | [`setup/install-rocm7-host.sh`](setup/install-rocm7-host.sh)             | Install ROCm 7.2 on an Ubuntu 25.10/26.04 host (uses noble/24.04 packages, ABI-compatible). Called by the bootstrap; can be run on its own. |
 | [`bench/log-thermals.sh`](bench/log-thermals.sh)                         | Log CPU/iGPU temps, SCLK, package power and VRAM/GTT to CSV while a benchmark runs, then flag whether the run was thermally valid. Wraps any command: `bench/log-thermals.sh -- <cmd>`. |
 | [`run/run-rocm7-baremetal.sh`](run/run-rocm7-baremetal.sh)               | Launch llama-server with ROCm 7.2 baremetal — sets all HSA env vars, auto-detects Vega 8 device index.             |
-| [`run/chat-ui.sh`](run/chat-ui.sh)                                       | **Chat UI with speed statistics** — serves [`ui/index.html`](ui/index.html) from llama-server itself (`--path`), showing time to first token, prefill t/s, token generation t/s and MTP draft acceptance per reply. |
+| [`run/chat-ui.sh`](run/chat-ui.sh)                                       | **Chat UI with speed statistics** — serves [`ui/index.html`](ui/index.html) on its own port and attaches to a llama-server you already have running. Shows time to first token, prefill t/s, generation t/s and MTP draft acceptance per reply. |
 
 ## ROCm on Vega 8
 
