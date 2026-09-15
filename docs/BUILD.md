@@ -257,6 +257,38 @@ export LD_LIBRARY_PATH="$PWD/llm/rocm7-vega/lib:/opt/rocm/lib"
 
 ## Running
 
+### Chat UI with speed statistics
+
+```bash
+./run/chat-ui.sh --rocm                      # then open http://127.0.0.1:8080
+MODEL=/path/to/model.gguf ./run/chat-ui.sh   # Vulkan, the default backend
+./run/chat-ui.sh --rocm --spec-type draft-mtp --spec-draft-n-max 2
+```
+
+[`ui/index.html`](../ui/index.html) is one self-contained page: no build step, no
+dependencies, nothing fetched from the internet. `llama-server --path` serves it in place
+of the built-in web UI, so the page and the API share an origin and no CORS setup is
+needed. [`run/chat-ui.sh`](../run/chat-ui.sh) layers that onto
+[`run/start-llama-server.sh`](../run/start-llama-server.sh), so every backend flag and the
+`MODEL` / `CTX` / `PORT` variables work unchanged.
+
+Every reply carries its own measurements:
+
+| Statistic | Where it comes from |
+| --- | --- |
+| Time to first token | measured in the browser — the server cannot see it |
+| Prefill t/s, token generation t/s | the server's `timings` object in the final SSE chunk |
+| Prompt and completion tokens, cached prompt tokens | the OpenAI `usage` object |
+| MTP draft acceptance | `timings.draft_n_accepted / draft_n`, present only when the server runs `--spec-type draft-mtp` |
+
+Only TTFT is computed in the browser; everything else is the server's own accounting
+rather than a guess made from the stream. The side panel keeps session medians and a
+sparkline of decode speed per turn, and **Copy stats as Markdown** puts the session on the
+clipboard as a table.
+
+`--rocm-docker` is refused: the container has no bind mount for `ui/`, so `--path` would
+point at nothing.
+
 ### Standalone llama-server (Default ROCm 7.2 Baremetal)
 
 ```bash

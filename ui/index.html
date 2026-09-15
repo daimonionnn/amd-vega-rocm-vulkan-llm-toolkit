@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vega 8 chat — llama.cpp</title>
+<style>
+:root{
+  --bg:#f7f7f8; --panel:#fff; --ink:#1a1a1c; --muted:#6b6b73; --line:#e3e3e8;
+  --user:#e8effb; --accent:#2f6fd0; --good:#1a7f45; --warn:#9a5b00; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#16161a; --panel:#1e1e24; --ink:#e9e9ee; --muted:#9a9aa6; --line:#2e2e38;
+         --user:#23304a; --accent:#6ea3f0; --good:#4cc281; --warn:#e0a458; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:14px;margin:0;font-weight:650;letter-spacing:.01em}
+.dot{width:8px;height:8px;border-radius:50%;background:#c33;display:inline-block;margin-right:6px}
+.dot.on{background:var(--good)}
+.meta{color:var(--muted);font-size:12px;font-family:var(--mono)}
+.spacer{flex:1}
+button{font:inherit;padding:6px 12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+input,textarea,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+main{flex:1;display:flex;min-height:0}
+#chat{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+#side{width:290px;border-left:1px solid var(--line);background:var(--panel);padding:14px;overflow-y:auto}
+@media (max-width:820px){ main{flex-direction:column} #side{width:auto;border-left:0;border-top:1px solid var(--line)} }
+.msg{max-width:min(760px,100%);padding:10px 13px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--user)}
+.msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.stats{align-self:flex-start;display:flex;flex-wrap:wrap;gap:6px;margin-top:-8px}
+.chip{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+.chip b{color:var(--ink);font-weight:600}
+.chip.acc b{color:var(--good)}
+.chip.slow b{color:var(--warn)}
+footer{padding:12px 14px;background:var(--panel);border-top:1px solid var(--line);display:flex;gap:10px}
+#prompt{flex:1;resize:vertical;min-height:48px;max-height:220px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+td{padding:3px 0}
+td:last-child{text-align:right;font-weight:600}
+.settings{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:12px;margin-bottom:16px}
+.settings input{width:100%}
+svg{display:block;width:100%;height:46px;margin:6px 0 2px}
+.hint{color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span id="dot" class="dot"></span>Vega 8 chat</h1>
+  <span id="model" class="meta">not connected</span>
+  <span class="spacer"></span>
+  <button id="export">Copy stats as Markdown</button>
+  <button id="clear">Clear</button>
+</header>
+
+<main>
+  <div id="chat"></div>
+  <aside id="side">
+    <h2>Server</h2>
+    <div class="settings">
+      <label for="server">URL</label><input id="server" value="">
+      <label for="system">System</label><input id="system" value="You are a helpful assistant.">
+      <label for="temp">Temp</label><input id="temp" type="number" step="0.1" min="0" max="2" value="0.7">
+      <label for="maxtok">Max tok</label><input id="maxtok" type="number" min="16" step="16" value="512">
+    </div>
+    <h2>This session</h2>
+    <svg id="spark" viewBox="0 0 100 30" preserveAspectRatio="none"></svg>
+    <div class="hint" id="sparkhint">token generation per turn</div>
+    <table id="summary"><tbody></tbody></table>
+  </aside>
+</main>
+
+<footer>
+  <textarea id="prompt" placeholder="Message…  (Enter sends, Shift+Enter newline)"></textarea>
+  <button id="send" class="primary">Send</button>
+  <button id="stop" disabled>Stop</button>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const turns = [];          // one entry per assistant reply
+let history = [];          // chat messages sent to the server
+let controller = null;
+
+$('#server').value = location.origin.startsWith('http') ? location.origin : 'http://127.0.0.1:8080';
+const base = () => $('#server').value.replace(/\/+$/, '');
+
+async function connect() {
+  try {
+    const p = await (await fetch(base() + '/props')).json();
+    const name = (p.model_path || '').split('/').pop() || 'model';
+    const ctx = p.default_generation_settings?.n_ctx ?? p.n_ctx;
+    $('#model').textContent = name + (ctx ? '  ·  ctx ' + ctx : '') + (p.build_info ? '  ·  ' + p.build_info : '');
+    $('#dot').classList.add('on');
+  } catch (e) {
+    $('#model').textContent = 'no server at ' + base();
+    $('#dot').classList.remove('on');
+  }
+}
+
+function el(cls, text) { const d = document.createElement('div'); d.className = cls; if (text) d.textContent = text; $('#chat').appendChild(d); return d; }
+const fmt = (v, d = 1) => v == null || !isFinite(v) ? '—' : v.toFixed(d);
+
+function chips(row, t) {
+  row.innerHTML = '';
+  const add = (label, value, cls = '') => {
+    const c = document.createElement('span'); c.className = 'chip ' + cls;
+    c.innerHTML = label + ' <b>' + value + '</b>'; row.appendChild(c);
+  };
+  add('TTFT', fmt(t.ttft, 0) + ' ms', t.ttft > 2000 ? 'slow' : '');
+  add('prefill', fmt(t.prefill) + ' t/s', '');
+  add('TG', fmt(t.tg, 2) + ' t/s', '');
+  add('tokens', t.promptTokens + ' in / ' + t.genTokens + ' out');
+  add('total', fmt(t.total / 1000, 2) + ' s');
+  if (t.acceptance != null) add('MTP accepted', fmt(t.acceptance * 100, 0) + '%', 'acc');
+  if (t.cached) add('cached', t.cached + ' tok');
+}
+
+function summarize() {
+  const tb = $('#summary').querySelector('tbody'); tb.innerHTML = '';
+  if (!turns.length) { $('#spark').innerHTML = ''; return; }
+  const med = a => { const s = [...a].filter(x => isFinite(x)).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+  const rows = [
+    ['turns', turns.length],
+    ['median TG', fmt(med(turns.map(t => t.tg)), 2) + ' t/s'],
+    ['median prefill', fmt(med(turns.map(t => t.prefill)), 1) + ' t/s'],
+    ['median TTFT', fmt(med(turns.map(t => t.ttft)), 0) + ' ms'],
+    ['tokens out', turns.reduce((s, t) => s + t.genTokens, 0)],
+  ];
+  const acc = turns.map(t => t.acceptance).filter(x => x != null);
+  if (acc.length) rows.push(['median accepted', fmt(med(acc) * 100, 0) + '%']);
+  for (const [k, v] of rows) tb.insertAdjacentHTML('beforeend', '<tr><td>' + k + '</td><td>' + v + '</td></tr>');
+
+  const vals = turns.map(t => t.tg).filter(isFinite);
+  const max = Math.max(...vals), min = Math.min(...vals, 0);
+  const pts = vals.map((v, i) => [vals.length === 1 ? 50 : i / (vals.length - 1) * 100, 30 - (v - min) / ((max - min) || 1) * 26 - 2]);
+  $('#spark').innerHTML = '<polyline fill="none" stroke="currentColor" stroke-width="1.2" opacity=".75" points="' +
+    pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' +
+    pts.map(p => '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="1.2" fill="currentColor"/>').join('');
+  $('#sparkhint').textContent = 'token generation per turn · ' + fmt(min, 1) + '–' + fmt(max, 1) + ' t/s';
+}
+
+async function send() {
+  const text = $('#prompt').value.trim();
+  if (!text) return;
+  $('#prompt').value = '';
+  el('msg user', text);
+  history.push({ role: 'user', content: text });
+
+  const bot = el('msg bot', '');
+  const row = el('stats', '');
+  $('#chat').scrollTop = $('#chat').scrollHeight;
+  $('#send').disabled = true; $('#stop').disabled = false;
+
+  const t0 = performance.now();
+  let ttft = null, chunks = 0, out = '', timings = null, usage = null;
+  controller = new AbortController();
+  try {
+    const res = await fetch(base() + '/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({
+        messages: [{ role: 'system', content: $('#system').value }, ...history],
+        stream: true, stream_options: { include_usage: true },
+        temperature: parseFloat($('#temp').value), max_tokens: parseInt($('#maxtok').value, 10)
+      })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let j; try { j = JSON.parse(payload); } catch { continue; }
+        const delta = j.choices?.[0]?.delta?.content;
+        if (delta) {
+          if (ttft === null) ttft = performance.now() - t0;
+          out += delta; chunks++;
+          bot.textContent = out;
+          $('#chat').scrollTop = $('#chat').scrollHeight;
+        }
+        if (j.timings) timings = j.timings;
+        if (j.usage) usage = j.usage;
+      }
+    }
+    history.push({ role: 'assistant', content: out });
+  } catch (e) {
+    bot.textContent = out + (e.name === 'AbortError' ? '\n\n[stopped]' : '\n\n[error] ' + e.message);
+  } finally {
+    $('#send').disabled = false; $('#stop').disabled = true; controller = null;
+  }
+
+  const total = performance.now() - t0;
+  // Server timings are authoritative; client-side numbers are the fallback when
+  // a run is stopped early or an older server omits them.
+  const genTokens = usage?.completion_tokens ?? chunks;
+  const t = {
+    ttft,
+    total,
+    genTokens,
+    promptTokens: usage?.prompt_tokens ?? timings?.prompt_n ?? 0,
+    prefill: timings?.prompt_per_second ?? (ttft ? (timings?.prompt_n ?? 0) / (ttft / 1000) : NaN),
+    tg: timings?.predicted_per_second ?? (ttft ? genTokens / ((total - ttft) / 1000) : NaN),
+    acceptance: timings?.draft_n ? timings.draft_n_accepted / timings.draft_n : null,
+    cached: timings?.cache_n ?? usage?.prompt_tokens_details?.cached_tokens ?? 0,
+  };
+  chips(row, t); turns.push(t); summarize();
+}
+
+$('#send').onclick = send;
+$('#stop').onclick = () => controller?.abort();
+$('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+$('#server').addEventListener('change', connect);
+$('#clear').onclick = () => { history = []; turns.length = 0; $('#chat').innerHTML = ''; summarize(); };
+$('#export').onclick = () => {
+  const head = '| # | TTFT ms | prefill t/s | TG t/s | in | out | total s | accepted |\n|--:|--:|--:|--:|--:|--:|--:|--:|\n';
+  const body = turns.map((t, i) => '| ' + (i + 1) + ' | ' + fmt(t.ttft, 0) + ' | ' + fmt(t.prefill, 1) + ' | ' + fmt(t.tg, 2) +
+    ' | ' + t.promptTokens + ' | ' + t.genTokens + ' | ' + fmt(t.total / 1000, 2) +
+    ' | ' + (t.acceptance == null ? '—' : fmt(t.acceptance * 100, 0) + '%') + ' |').join('\n');
+  navigator.clipboard.writeText(head + body).then(() => { $('#export').textContent = 'Copied'; setTimeout(() => $('#export').textContent = 'Copy stats as Markdown', 1200); });
+};
+connect();
+</script>
+</body>
+</html>
